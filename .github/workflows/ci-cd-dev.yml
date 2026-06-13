@@ -1,0 +1,43 @@
+name: DEV CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "dev", "develop" ]
+  pull_request:
+    branches: [ "dev", "develop" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    environment: dev  # GitHub Actions Environment Name
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: docker-compose config --quiet
+
+      - name: Build Images for Dev
+        run: |
+          docker build -t auth-service:dev ./auth_service
+          docker build -t execution-service:dev ./execution_service
+          docker build -t ai-service:dev ./ai_service
+          docker build -t review-service:dev ./review_service
+          docker build -t frontend:dev ./frontend
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Mock Dev Deployment Step
+        run: |
+          echo "Add your DEV deployment commands here!"
+          echo "For example, authenticating with AWS/GCP and pushing Docker images to a Dev Container Registry."
+          echo "Then triggering a deployment to your Dev server (e.g., EC2, Cloud Run, Kubernetes)."

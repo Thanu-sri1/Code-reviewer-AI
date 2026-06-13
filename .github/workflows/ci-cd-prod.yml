@@ -1,0 +1,47 @@
+name: PROD CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    environment: prod  # GitHub Actions Environment Name
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Configuration
+        run: docker-compose config --quiet
+
+      - name: Build Images for Prod
+        run: |
+          docker build -t auth-service:prod ./auth_service
+          docker build -t execution-service:prod ./execution_service
+          docker build -t ai-service:prod ./ai_service
+          docker build -t review-service:prod ./review_service
+          docker build -t frontend:prod ./frontend
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: prod
+    if: github.event_name == 'push'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Require Manual Approval
+        run: |
+          echo "Prod deployments typically require manual approval. You can configure this in your GitHub repository's Settings > Environments > 'prod' > Required reviewers."
+
+      - name: Mock Prod Deployment Step
+        run: |
+          echo "Add your PROD deployment commands here!"
+          echo "For example, pushing to a Production Container Registry and updating the Production Cluster."

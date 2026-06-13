@@ -1,0 +1,37 @@
+services:
+  auth-service:
+    build: ./auth_service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./auth_service:/app
+
+  execution-service:
+    build: ./execution_service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./execution_service:/app
+
+  ai-service:
+    build: ./ai_service
+    ports:
+      - "8003:8003"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./ai_service:/app
+
+  review-service:
+    build: ./review_service
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./review_service:/app
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app
