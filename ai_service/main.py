@@ -10,11 +10,6 @@ app = FastAPI(title="AI Service")
 key = (os.getenv("GEMINI_API_KEY") or "").strip().strip("\"'")
 if not key:
     raise RuntimeError("Gemini API key not found. Please set GEMINI_API_KEY.")
-if not key.startswith("AIza"):
-    raise RuntimeError(
-        "GEMINI_API_KEY does not look like a Google AI Studio API key. "
-        "Create one at https://aistudio.google.com/app/apikey and use the value that starts with AIza."
-    )
 
 genai.configure(api_key=key)
 
