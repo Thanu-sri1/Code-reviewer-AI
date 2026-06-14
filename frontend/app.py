@@ -25,20 +25,25 @@ def is_valid_python_code(text):
         return False
 
 
-def authenticate(username, password):
+def authenticate(email, password):
     try:
-        response = requests.post(f"{AUTH_SERVICE_URL}/login", json={"username": username, "password": password})
-        return response.status_code == 200
+        response = requests.post(f"{AUTH_SERVICE_URL}/login", json={"email": email, "password": password})
+        if response.status_code == 200:
+            return response.json()
+        return None
     except requests.ConnectionError:
         st.error("Auth Service is unreachable.")
-        return False
+        return None
 
 
-def register_user(username, password):
-    if not username or not password:
+def register_user(username, email, password):
+    if not username or not email or not password:
         return False
     try:
-        response = requests.post(f"{AUTH_SERVICE_URL}/register", json={"username": username, "password": password})
+        response = requests.post(
+            f"{AUTH_SERVICE_URL}/register",
+            json={"username": username, "email": email, "password": password},
+        )
         return response.status_code == 200
     except requests.ConnectionError:
         st.error("Auth Service is unreachable.")
@@ -262,6 +267,12 @@ def show_about_page():
 
 
 def show_auth_page():
+    st.markdown(
+        """
+        <h1 style="text-align:center; margin-top: 0;">Code Raptor</h1>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("Login / Register")
     st.info("Login or create an account to access code review, file upload, and code execution.")
 
@@ -273,10 +284,17 @@ def show_auth_page():
     login_tab, register_tab = st.tabs(["Login", "Register"])
 
     with login_tab:
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
+        email = st.text_input("Email", key="login_email")
+        show_login_password = st.checkbox("Show password", key="show_login_password")
+        password = st.text_input(
+            "Password",
+            type="default" if show_login_password else "password",
+            key="login_password",
+        )
         if st.button("Login", type="primary"):
-            if authenticate(username, password):
+            login_data = authenticate(email, password)
+            if login_data:
+                username = login_data.get("username", email)
                 st.session_state["username"] = username
                 st.session_state["tabs"] = load_user_reviews(username)
                 if not st.session_state["tabs"]:
@@ -284,16 +302,22 @@ def show_auth_page():
                 st.session_state["page"] = "Review"
                 st.rerun()
             else:
-                st.error("Invalid username or password")
+                st.error("Invalid email or password")
 
     with register_tab:
         new_username = st.text_input("Username", key="reg_username")
-        new_password = st.text_input("Password", type="password", key="reg_password")
+        new_email = st.text_input("Email", key="reg_email")
+        show_register_password = st.checkbox("Show password", key="show_register_password")
+        password_type = "default" if show_register_password else "password"
+        new_password = st.text_input("Password", type=password_type, key="reg_password")
+        confirm_password = st.text_input("Confirm Password", type=password_type, key="reg_confirm_password")
         if st.button("Register", type="primary"):
-            if register_user(new_username, new_password):
+            if new_password != confirm_password:
+                st.error("Password and confirm password do not match.")
+            elif register_user(new_username, new_email, new_password):
                 st.success("Registration successful. Please login.")
             else:
-                st.error("Username already exists or invalid input.")
+                st.error("Username or email already exists, or input is invalid.")
 
 
 def get_current_tab_data():
