@@ -26,8 +26,8 @@ services:
       - "8003"
     ports:
       - "8003:8003"
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    env_file:
+      - .env
     volumes:
       - ./ai_service:/app
 
