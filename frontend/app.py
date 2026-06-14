@@ -15,6 +15,7 @@ AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8001")
 EXECUTION_SERVICE_URL = os.getenv("EXECUTION_SERVICE_URL", "http://localhost:8002")
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8003")
 REVIEW_SERVICE_URL = os.getenv("REVIEW_SERVICE_URL", "http://localhost:8004")
+AUTH_REQUIRED_MESSAGE = "Please login or register before using code review, file upload, or code execution."
 
 def is_valid_python_code(text):
     try:
@@ -131,6 +132,10 @@ def run_code(code, tab_id):
 
 
 def review_code(code, tab_id):
+    if not st.session_state.get("username"):
+        st.warning(AUTH_REQUIRED_MESSAGE)
+        return
+
     try:
         response = requests.post(f"{AI_SERVICE_URL}/review", json={"code": code})
         if response.status_code == 200:
@@ -258,6 +263,7 @@ def show_about_page():
 
 def show_auth_page():
     st.title("Login / Register")
+    st.info("Login or create an account to access code review, file upload, and code execution.")
 
     if st.session_state.get("username"):
         st.session_state["page"] = "Review"
@@ -303,6 +309,10 @@ def get_current_tab_data():
 
 
 def handle_upload(uploaded_file):
+    if not st.session_state.get("username"):
+        st.warning(AUTH_REQUIRED_MESSAGE)
+        return
+
     file_type = uploaded_file.type
 
     if file_type == "text/x-python":
@@ -352,6 +362,12 @@ def handle_upload(uploaded_file):
 
 
 def show_review_page():
+    if not st.session_state.get("username"):
+        st.warning(AUTH_REQUIRED_MESSAGE)
+        st.session_state["page"] = "Login/Register"
+        show_auth_page()
+        return
+
     current_tab, current_tab_data = get_current_tab_data()
 
     st.title("Code Review")
@@ -371,14 +387,18 @@ def show_review_page():
         handle_upload(uploaded_file)
 
     if code != current_tab_data["code"]:
-        st.session_state["tabs"][current_tab]["code"] = code
         if st.session_state.get("username"):
+            st.session_state["tabs"][current_tab]["code"] = code
             save_review(st.session_state["username"], current_tab, st.session_state["tabs"][current_tab])
+        else:
+            st.warning(AUTH_REQUIRED_MESSAGE)
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Run Code", key=f"run_{current_tab}", use_container_width=True):
-            if code.strip():
+            if not st.session_state.get("username"):
+                st.warning(AUTH_REQUIRED_MESSAGE)
+            elif code.strip():
                 result = run_code(code, current_tab)
                 st.session_state["tabs"][current_tab]["run_output"] = result
                 if st.session_state.get("username"):
@@ -388,7 +408,9 @@ def show_review_page():
 
     with col2:
         if st.button("Review Code", key=f"review_{current_tab}", type="primary", use_container_width=True):
-            if code.strip():
+            if not st.session_state.get("username"):
+                st.warning(AUTH_REQUIRED_MESSAGE)
+            elif code.strip():
                 review_code(code, current_tab)
             else:
                 st.warning("Please enter some code.")
