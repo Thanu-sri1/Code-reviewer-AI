@@ -1,4 +1,5 @@
 import ast
+import difflib
 import hashlib
 import os
 import uuid
@@ -16,6 +17,50 @@ EXECUTION_SERVICE_URL = os.getenv("EXECUTION_SERVICE_URL", "http://localhost:800
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8003")
 REVIEW_SERVICE_URL = os.getenv("REVIEW_SERVICE_URL", "http://localhost:8004")
 AUTH_REQUIRED_MESSAGE = "Please login or register before using code review, file upload, or code execution."
+
+
+def inject_dashboard_styles():
+    st.markdown(
+        """
+        <style>
+        .score-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 14px 16px;
+            background: #ffffff;
+            min-height: 112px;
+        }
+        .score-card .label {
+            color: #4b5563;
+            font-size: 0.86rem;
+            margin-bottom: 6px;
+        }
+        .score-card .value {
+            color: #111827;
+            font-size: 1.45rem;
+            font-weight: 700;
+        }
+        .score-card .hint {
+            color: #6b7280;
+            font-size: 0.78rem;
+            margin-top: 4px;
+        }
+        .rating-badge {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: white;
+            background: #2563eb;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_dashboard_styles()
 
 def is_valid_python_code(text):
     try:
@@ -63,7 +108,7 @@ def load_user_reviews(username):
 
 def save_review(username, tab_id, tab_data):
     if not username:
-        return
+        return None
     try:
         payload = {
             "id": tab_id,
@@ -73,9 +118,15 @@ def save_review(username, tab_id, tab_data):
             "fixed_code": tab_data["fixed_code"],
             "timestamp": tab_data["timestamp"],
         }
-        requests.post(f"{REVIEW_SERVICE_URL}/reviews/{username}", json=payload)
+        response = requests.post(f"{REVIEW_SERVICE_URL}/reviews/{username}", json=payload)
+        if response.status_code == 200:
+            analysis = response.json().get("analysis")
+            if analysis:
+                st.session_state["tabs"][tab_id]["analysis"] = analysis
+            return analysis
+        return None
     except requests.ConnectionError:
-        pass
+        return None
 
 
 def create_new_tab():
@@ -86,6 +137,7 @@ def create_new_tab():
         "review_output": "",
         "run_output": "",
         "fixed_code": "",
+        "analysis": None,
         "editor_key": 0,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -136,6 +188,256 @@ def run_code(code, tab_id):
         return f"Error: {str(e)}"
 
 
+def load_analysis(tab_id):
+    try:
+        response = requests.get(f"{REVIEW_SERVICE_URL}/api/analysis/{tab_id}")
+        if response.status_code == 200:
+            analysis = response.json()
+            st.session_state["tabs"][tab_id]["analysis"] = analysis
+            return analysis
+    except requests.ConnectionError:
+        pass
+    return st.session_state["tabs"].get(tab_id, {}).get("analysis")
+
+
+def get_metrics_section(analysis):
+    if not analysis:
+        return {}
+    metrics = analysis.get("metrics", {})
+    if "metrics" in metrics:
+        return metrics["metrics"]
+    return metrics
+
+
+def get_variable_section(analysis):
+    if not analysis:
+        return {}
+    metrics = analysis.get("metrics", {})
+    if "variable_analysis" in metrics:
+        return metrics.get("variable_analysis", {})
+    return analysis.get("variables", {})
+
+
+def get_function_section(analysis):
+    if not analysis:
+        return {}
+    metrics = analysis.get("metrics", {})
+    if "function_analysis" in metrics:
+        return metrics.get("function_analysis", {})
+    return analysis.get("functions", {})
+
+
+def get_recommendations_section(analysis):
+    if not analysis:
+        return []
+    recommendations = analysis.get("recommendations", [])
+    if isinstance(recommendations, dict):
+        return recommendations.get("recommendations", [])
+    return recommendations
+
+
+def numeric_score(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def score_color(score):
+    score = numeric_score(score)
+    if score >= 85:
+        return "#16a34a"
+    if score >= 70:
+        return "#2563eb"
+    if score >= 50:
+        return "#d97706"
+    return "#dc2626"
+
+
+def render_score_card(label, value, hint="", max_value=100):
+    score = numeric_score(value)
+    progress_value = max(0, min(100, score)) / max_value
+    st.markdown(
+        f"""
+        <div class="score-card">
+            <div class="label">{label}</div>
+            <div class="value" style="color:{score_color(score)}">{round(score, 2)}</div>
+            <div class="hint">{hint}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.progress(progress_value)
+
+
+def render_number_card(label, value, hint=""):
+    st.markdown(
+        f"""
+        <div class="score-card">
+            <div class="label">{label}</div>
+            <div class="value">{value}</div>
+            <div class="hint">{hint}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def build_code_diff(original_code, fixed_code):
+    if not fixed_code:
+        return ""
+    return "\n".join(
+        difflib.unified_diff(
+            original_code.splitlines(),
+            fixed_code.splitlines(),
+            fromfile="Current code",
+            tofile="Fixed code",
+            lineterm="",
+        )
+    )
+
+
+def build_review_report(tab_id, tab_data):
+    analysis = tab_data.get("analysis") or {}
+    metrics = get_metrics_section(analysis)
+    variables = get_variable_section(analysis)
+    functions = get_function_section(analysis)
+    memory = analysis.get("memory", {})
+    performance = analysis.get("performance", {})
+    health = analysis.get("health", {})
+    recommendations = get_recommendations_section(analysis)
+    diff = build_code_diff(tab_data.get("code", ""), tab_data.get("fixed_code", ""))
+
+    lines = [
+        "# Code Raptor Review Report",
+        "",
+        f"- Review ID: `{tab_id}`",
+        f"- Generated At: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`",
+        f"- Saved At: `{tab_data.get('timestamp', '')}`",
+        "",
+        "## Easy Summary",
+        "",
+        f"- Overall Code Health: {health.get('score', 'N/A')} {health.get('rating', '')}",
+        f"- Easy To Maintain: {metrics.get('maintainability_score', 'N/A')}",
+        f"- Code Cleanliness: {metrics.get('code_quality_score', 'N/A')}",
+        f"- Cleanup Needed: {metrics.get('technical_debt_score', 'N/A')}",
+        f"- Memory Safety: {memory.get('score', 'N/A')}",
+        f"- Speed Score: {performance.get('score', 'N/A')}",
+        "",
+        "## Code Metrics",
+        "",
+        f"- LOC: {metrics.get('loc', 0)}",
+        f"- Classes: {metrics.get('classes', 0)}",
+        f"- Functions: {metrics.get('functions', functions.get('total', 0))}",
+        f"- Variables: {metrics.get('variables', variables.get('total', 0))}",
+        f"- Imports: {metrics.get('imports', 0)}",
+        f"- Logic Complexity: {metrics.get('cyclomatic_complexity', 0)}",
+        f"- Comment Percentage: {metrics.get('comment_percentage', 0)}%",
+        "",
+        "## Variable Analysis",
+        "",
+        f"- Total: {variables.get('total', 0)}",
+        f"- Global: {variables.get('global', 0)}",
+        f"- Local: {variables.get('local', 0)}",
+        f"- Unused: {variables.get('unused', 0)}",
+        f"- Unused Names: {', '.join(variables.get('unused_names', [])) or 'None'}",
+        "",
+        "## AI Review",
+        "",
+        tab_data.get("review_output", "No AI review available."),
+        "",
+        "## Suggestions To Improve The Code",
+        "",
+    ]
+
+    if recommendations:
+        for recommendation in recommendations:
+            if isinstance(recommendation, dict):
+                lines.append(
+                    f"- [{recommendation.get('priority', 'medium')}] "
+                    f"{recommendation.get('category', 'general')}: {recommendation.get('message', '')}"
+                )
+            else:
+                lines.append(f"- {recommendation}")
+    else:
+        lines.append("- No recommendations available.")
+
+    lines.extend(["", "## Fixed Code Diff", "", "```diff", diff or "No fixed-code diff available.", "```"])
+
+    if tab_data.get("fixed_code"):
+        lines.extend(["", "## Fixed Code", "", "```python", tab_data["fixed_code"], "```"])
+
+    if tab_data.get("run_output"):
+        lines.extend(["", "## Last Run Output", "", "```text", tab_data["run_output"], "```"])
+
+    return "\n".join(lines)
+
+
+def summarize_ai_error(response):
+    try:
+        detail = response.json().get("detail", response.text)
+    except ValueError:
+        detail = response.text
+
+    detail_text = str(detail)
+    if response.status_code == 429 or "quota" in detail_text.lower() or "rate" in detail_text.lower():
+        return (
+            "The AI reviewer is temporarily unavailable because an API limit was reached. The app still checked "
+            "your code locally and created the code health, memory, speed, and cleanup suggestions."
+        )
+    return f"AI Service error: {detail_text}"
+
+
+def build_static_review_feedback(analysis, reason):
+    metrics = get_metrics_section(analysis)
+    variables = get_variable_section(analysis)
+    functions = get_function_section(analysis)
+    memory = analysis.get("memory", {}) if analysis else {}
+    performance = analysis.get("performance", {}) if analysis else {}
+    health = analysis.get("health", {}) if analysis else {}
+    recommendations = get_recommendations_section(analysis)
+
+    lines = [
+        "### Code Review",
+        "",
+        reason,
+        "",
+        "AI review is temporarily unavailable, so Code Raptor used its built-in code checker.",
+        "",
+        "#### Summary",
+        f"- Overall Code Health: {health.get('score', 'N/A')} {health.get('rating', '')}",
+        f"- Easy To Maintain: {metrics.get('maintainability_score', 'N/A')}",
+        f"- Cleanup Needed: {metrics.get('technical_debt_score', 'N/A')}",
+        f"- Logic Complexity: {metrics.get('cyclomatic_complexity', 'N/A')}",
+        f"- Variables: {variables.get('total', 0)} total, {variables.get('unused', 0)} unused",
+        f"- Functions: {functions.get('total', 0)} total",
+        f"- Memory Score: {memory.get('score', 'N/A')}",
+        f"- Performance Score: {performance.get('score', 'N/A')}",
+        "",
+        "#### Suggestions",
+    ]
+
+    if recommendations:
+        for item in recommendations[:8]:
+            if isinstance(item, dict):
+                lines.append(f"- {item.get('message', '')}")
+            else:
+                lines.append(f"- {item}")
+    else:
+        lines.append("- No high-impact local recommendations were detected.")
+
+    if variables.get("unused_names"):
+        lines.extend(["", "#### Unused Variables", f"- {', '.join(variables['unused_names'])}"])
+
+    if functions.get("refactoring_opportunities"):
+        lines.append("")
+        lines.append("#### Code Cleanup Ideas")
+        for item in functions["refactoring_opportunities"]:
+            lines.append(f"- {item}")
+
+    return "\n".join(lines)
+
+
 def review_code(code, tab_id):
     if not st.session_state.get("username"):
         st.warning(AUTH_REQUIRED_MESSAGE)
@@ -146,13 +448,27 @@ def review_code(code, tab_id):
         if response.status_code == 200:
             data = response.json()
             st.session_state["tabs"][tab_id]["review_output"] = data.get("review_output", "")
-            if data.get("fixed_code"):
-                st.session_state["tabs"][tab_id]["fixed_code"] = data.get("fixed_code")
+            fixed_code = data.get("fixed_code", "")
+            if fixed_code and is_valid_python_code(fixed_code):
+                st.session_state["tabs"][tab_id]["fixed_code"] = fixed_code
+            else:
+                st.session_state["tabs"][tab_id]["fixed_code"] = ""
+                if fixed_code:
+                    st.warning("The AI reviewer returned code that was not valid Python, so it was not applied.")
 
             if st.session_state.get("username"):
                 save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
+                load_analysis(tab_id)
         else:
-            st.error(f"Error from AI Service: {response.text}")
+            reason = summarize_ai_error(response)
+            analysis = save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
+            if analysis:
+                st.session_state["tabs"][tab_id]["review_output"] = build_static_review_feedback(analysis, reason)
+                st.session_state["tabs"][tab_id]["fixed_code"] = ""
+                save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
+                st.warning(reason)
+            else:
+                st.error(reason)
     except Exception as e:
         st.error(f"Error during code review: {str(e)}")
 
@@ -177,12 +493,23 @@ def init_session_state():
         st.session_state["page"] = "Review"
 
 
-def apply_fixed_code(tab_id):
-    if st.session_state["tabs"][tab_id]["fixed_code"]:
-        st.session_state["tabs"][tab_id]["code"] = st.session_state["tabs"][tab_id]["fixed_code"]
-        st.session_state["tabs"][tab_id]["editor_key"] += 1
-        if st.session_state.get("username"):
-            save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
+def apply_fixed_code(tab_id, run_after_apply=False):
+    fixed_code = st.session_state["tabs"][tab_id]["fixed_code"]
+    if not fixed_code:
+        st.warning("No fixed code is available to apply.")
+        return
+    if not is_valid_python_code(fixed_code):
+        st.error("The suggested fixed code is not valid Python, so it was not applied.")
+        return
+
+    st.session_state["tabs"][tab_id]["code"] = fixed_code
+    st.session_state["tabs"][tab_id]["editor_key"] += 1
+
+    if run_after_apply:
+        st.session_state["tabs"][tab_id]["run_output"] = run_code(fixed_code, tab_id)
+
+    if st.session_state.get("username"):
+        save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
 
 
 def logout_user():
@@ -199,6 +526,9 @@ def show_sidebar():
 
         if st.button("Code Review", type="primary", use_container_width=True):
             st.session_state["page"] = "Review"
+            st.rerun()
+        if st.button("Code Health", use_container_width=True):
+            st.session_state["page"] = "Code Health"
             st.rerun()
         if st.button("About", use_container_width=True):
             st.session_state["page"] = "About"
@@ -249,7 +579,8 @@ def show_about_page():
         - Extract code from uploaded PNG and JPG images.
         - Upload Python files directly into the editor.
         - Run Python code and view output.
-        - Review code with Gemini and apply suggested fixes.
+        - Review code with Azure AI and apply suggested fixes.
+        - View easy code health, memory, speed, cleanup, and variable checks.
         - Save review history after login.
         """
     )
@@ -260,7 +591,7 @@ def show_about_page():
         - Frontend: Streamlit interface.
         - Auth service: login and registration.
         - Execution service: code running.
-        - AI service: Gemini review and image extraction.
+        - AI service: Azure AI review and image extraction.
         - Review service: history storage.
         """
     )
@@ -330,6 +661,121 @@ def get_current_tab_data():
         current_tab = st.session_state["current_tab"]
 
     return current_tab, st.session_state["tabs"][current_tab]
+
+
+def metric_value(analysis, key, default=0):
+    if not analysis:
+        return default
+    metrics = get_metrics_section(analysis)
+    return metrics.get(key, default)
+
+
+def render_analysis_cards(analysis):
+    if not analysis:
+        st.info("Run or save a review to generate code metrics.")
+        return
+
+    variable_analysis = get_variable_section(analysis)
+    function_analysis = get_function_section(analysis)
+    memory = analysis.get("memory", {})
+    performance = analysis.get("performance", {})
+    health = analysis.get("health", {})
+    recommendations = get_recommendations_section(analysis)
+
+    st.markdown(
+        f"""
+        <span class="rating-badge" style="background:{score_color(health.get('score', 0))}">
+            Overall Code Health: {health.get('rating', 'Not Rated')}
+        </span>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    score_cols = st.columns(5)
+    with score_cols[0]:
+        render_score_card("Overall Health", health.get("score", 0), "Overall condition of the code")
+    with score_cols[1]:
+        render_score_card("Memory Safety", memory.get("score", 0), "Higher means fewer memory problems")
+    with score_cols[2]:
+        render_score_card("Speed Score", performance.get("score", 0), "Higher means fewer slow code patterns")
+    with score_cols[3]:
+        render_score_card("Easy To Maintain", metric_value(analysis, "maintainability_score"), "How easy it is to change later")
+    with score_cols[4]:
+        render_score_card("Clean Code", metric_value(analysis, "code_quality_score"), "How clean the code looks")
+
+    number_cols = st.columns(6)
+    with number_cols[0]:
+        render_number_card("Total Variables", metric_value(analysis, "variables", variable_analysis.get("total", 0)), "Global + local")
+    with number_cols[1]:
+        render_number_card("Unused Variables", variable_analysis.get("unused", 0), "Can usually be removed")
+    with number_cols[2]:
+        render_number_card("Functions", metric_value(analysis, "functions", function_analysis.get("total", 0)), "Methods included")
+    with number_cols[3]:
+        render_number_card("Logic Complexity", metric_value(analysis, "cyclomatic_complexity"), "Lower is easier to understand")
+    with number_cols[4]:
+        render_number_card("Cleanup Needed", metric_value(analysis, "technical_debt_score"), "Lower is better")
+    with number_cols[5]:
+        render_number_card("LOC", metric_value(analysis, "loc"), "Non-empty code lines")
+
+    detail_tab, memory_tab, performance_tab, recommendations_tab = st.tabs(
+        ["Code Health", "Memory", "Speed", "Suggestions"]
+    )
+    with detail_tab:
+        st.table(
+            [
+                {"Metric": "LOC", "Value": metric_value(analysis, "loc")},
+                {"Metric": "Classes", "Value": metric_value(analysis, "classes")},
+                {"Metric": "Functions", "Value": metric_value(analysis, "functions", function_analysis.get("total", 0))},
+                {"Metric": "Imports", "Value": metric_value(analysis, "imports")},
+                {"Metric": "Comment %", "Value": metric_value(analysis, "comment_percentage")},
+                {"Metric": "Global Variables", "Value": variable_analysis.get("global", 0)},
+                {"Metric": "Local Variables", "Value": variable_analysis.get("local", 0)},
+            ]
+        )
+        if variable_analysis.get("unused_names"):
+            st.warning(f"Unused variables: {', '.join(variable_analysis['unused_names'])}")
+        if function_analysis.get("refactoring_opportunities"):
+            st.write("Code Cleanup Ideas")
+            st.table([{"Recommendation": item} for item in function_analysis["refactoring_opportunities"]])
+    with memory_tab:
+        patterns = memory.get("patterns", [])
+        if patterns:
+            st.table(patterns)
+        else:
+            st.success("No memory-heavy patterns detected.")
+        if memory.get("recommendations"):
+            st.write("Memory Suggestions")
+            st.table([{"Recommendation": item} for item in memory["recommendations"]])
+    with performance_tab:
+        st.metric("Nested loops", performance.get("nested_loops", 0))
+        patterns = performance.get("patterns", [])
+        if patterns:
+            st.table(patterns)
+        else:
+            st.success("No performance-heavy patterns detected.")
+        if performance.get("recommendations"):
+            st.write("Speed Suggestions")
+            st.table([{"Recommendation": item} for item in performance["recommendations"]])
+    with recommendations_tab:
+        if recommendations:
+            st.table(recommendations)
+        else:
+            st.success("No high-impact recommendations detected.")
+
+
+def show_dashboard_page():
+    st.title("Code Health")
+    current_tab, current_tab_data = get_current_tab_data()
+    analysis = current_tab_data.get("analysis") or load_analysis(current_tab)
+    render_analysis_cards(analysis)
+    report = build_review_report(current_tab, current_tab_data)
+    st.download_button(
+        "Download Code Report",
+        data=report,
+        file_name=f"code-raptor-report-{current_tab}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
 
 
 def handle_upload(uploaded_file):
@@ -448,9 +894,34 @@ def show_review_page():
         st.markdown(current_tab_data["review_output"])
 
         if current_tab_data["fixed_code"]:
-            if st.button("Apply Fixed Code", key=f"apply_{current_tab}"):
-                apply_fixed_code(current_tab)
+            st.markdown("#### Fixed Code Review")
+            preview_tab, diff_tab = st.tabs(["Before and After", "Exact Changes"])
+            with preview_tab:
+                before_col, after_col = st.columns(2)
+                with before_col:
+                    st.caption("Current Code")
+                    st.code(current_tab_data["code"], language="python")
+                with after_col:
+                    st.caption("Fixed Code")
+                    st.code(current_tab_data["fixed_code"], language="python")
+            with diff_tab:
+                diff = build_code_diff(current_tab_data["code"], current_tab_data["fixed_code"])
+                st.code(diff or "No differences detected.", language="diff")
+
+            if st.button("Apply & Run Fixed Code", key=f"apply_{current_tab}"):
+                apply_fixed_code(current_tab, run_after_apply=True)
                 st.rerun()
+
+    st.markdown("#### Code Health")
+    render_analysis_cards(current_tab_data.get("analysis"))
+    report = build_review_report(current_tab, current_tab_data)
+    st.download_button(
+        "Download Code Report",
+        data=report,
+        file_name=f"code-raptor-report-{current_tab}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
 
 
 init_session_state()
@@ -463,5 +934,7 @@ else:
 
     if st.session_state["page"] == "About":
         show_about_page()
+    elif st.session_state["page"] == "Code Health":
+        show_dashboard_page()
     else:
         show_review_page()

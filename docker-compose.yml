@@ -49,7 +49,10 @@ services:
     ports:
       - "8003:8003"
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY:?Set GEMINI_API_KEY before running docker compose}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT:-}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2025-01-01-preview}
     volumes:
       - ./ai_service:/app
 

@@ -1,16 +1,49 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from pydantic import BaseModel
-import google.generativeai as genai
+import ast
+import base64
+import json
+import logging
 import os
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
-from PIL import Image
-import io
+
+from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from pydantic import BaseModel
+
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='{"timestamp":"%(asctime)s","level":"%(levelname)s","service":"ai-service","message":"%(message)s"}',
+)
+logger = logging.getLogger("ai-service")
 
 app = FastAPI(title="AI Service")
+REQUEST_COUNT = 0
+REQUEST_LATENCY_SECONDS = 0.0
 
-@app.get("/health")
-def health_check():
-    return {"service": "ai-service", "status": "ok", "gemini_key_loaded": bool(key)}
+
+@app.middleware("http")
+async def track_requests(request, call_next):
+    global REQUEST_COUNT, REQUEST_LATENCY_SECONDS
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - started
+    REQUEST_COUNT += 1
+    REQUEST_LATENCY_SECONDS += elapsed
+    logger.info(
+        json.dumps(
+            {
+                "event": "request_completed",
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round(elapsed * 1000, 2),
+            }
+        )
+    )
+    return response
+
 
 def read_env_value(name: str) -> str:
     value = (os.getenv(name) or "").strip().strip("\"'")
@@ -30,102 +63,290 @@ def read_env_value(name: str) -> str:
 
     return ""
 
-key = read_env_value("GEMINI_API_KEY")
-if key:
-    genai.configure(api_key=key)
 
-system_prompt = """You are a code reviewer specializing in Python. Your task is to:
-- Analyze submitted code.
-- Identify potential bugs or errors.
-- Suggest optimizations or improvements.
-- Provide the corrected version in Python if the code is in another language.
+AZURE_OPENAI_ENDPOINT = read_env_value("AZURE_OPENAI_ENDPOINT").rstrip("/")
+AZURE_OPENAI_API_KEY = read_env_value("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_DEPLOYMENT = read_env_value("AZURE_OPENAI_DEPLOYMENT")
+AZURE_OPENAI_API_VERSION = read_env_value("AZURE_OPENAI_API_VERSION") or "2025-01-01-preview"
 
-🔍 **Response Structure**:
-1️⃣ **Bug/Error Identification**
-   - Detect errors in the provided code.
-   - If it's **not Python**, identify the language and explain syntax differences.
-   
-2️⃣ **Suggested Fixes/Optimizations**
-   - Recommend fixes for errors.
-   - If the code is in another language, show the **correct equivalent in Python**.
 
-3️⃣ **Corrected Code**
-   - Provide the correct **Python version**.
-   - Ensure it's fully functional and valid.
-   - Explain the changes.
+SYSTEM_PROMPT = """You are a helpful Python code reviewer. Your task is to:
+- Explain problems in simple words that students and beginners can understand.
+- Find bugs, risky code, slow code, unused variables, and confusing functions.
+- Suggest simple improvements for memory use, speed, readability, and structure.
+- Provide a corrected Python version only when a clear fix is needed.
 
-📌 **Important**:
+Response format:
+1. Problems Found
+   - Explain each issue in simple language.
+   - Say why it matters.
+
+2. Simple Suggestions
+   - Give short, practical suggestions.
+   - Use beginner-friendly terms.
+   - Avoid unnecessary theory.
+
+3. Corrected Code
+   - Provide one compact, corrected Python version.
+   - Preserve the user's original purpose and style as much as possible.
+   - Fix only what is needed.
+   - Do not rewrite the code into a large framework, class hierarchy, CLI app, or production template.
+   - If the original code is already runnable, return the same code with only minimal improvements.
+   - Explain changes outside the code block.
+
+Important:
 - If the code is in Java, C++, JavaScript, etc., explain how to translate it into Python.
-- DO NOT reject non-Python code; instead, analyze it and convert it if possible.
-- Always wrap the corrected Python code in triple backticks with 'python' language identifier.
+- Do not reject non-Python code; analyze it and convert it if possible.
+- Put the final corrected runnable Python code in exactly one section titled "Corrected Code".
+- Wrap only the corrected Python code in triple backticks with the python language identifier.
 """
 
-system_prompt2 = """📌 Role: You are an advanced AI model specialized in extracting raw programming code from images.
+EXTRACT_PROMPT = """Extract only the programming code from this image.
+Do not include explanations, comments, markdown, JSON, headers, or extra text.
+Preserve indentation, special characters, and syntax exactly as seen in the image.
+If the image does not contain code, return: No code detected in the image.
+"""
 
-🎯 Task:
-
-    Extract only the programming code from the given image.
-    Do NOT include explanations, comments, or any extra text.
-    Do NOT format the output as markdown, JSON, or any other structured format—just return the plain code.
-    Preserve indentation, special characters, and syntax exactly as seen in the image.
-
-⚠️ Restrictions:
-    
-    Do not add headers, footers, or descriptions.
-    Do not modify, interpret, or translate the code.
-    If the image contains multiple code snippets, extract them in the same order as they appear.
-    if it doesn't contain any code just return a polite request to include a photo that contains code.
-
-✅ Expected Output:
-    
-    The raw programming code extracted as plain text, exactly as shown in the image."""
-
-model = genai.GenerativeModel("gemini-2.5-flash", system_instruction=system_prompt)
-model2 = genai.GenerativeModel("gemini-2.5-flash", system_instruction=system_prompt2)
 
 class ReviewRequest(BaseModel):
     code: str
+
 
 class ReviewResponse(BaseModel):
     review_output: str
     fixed_code: str
 
-@app.post("/review", response_model=ReviewResponse)
-def review_code(request: ReviewRequest):
-    if not key:
-        raise HTTPException(status_code=500, detail="Gemini API key not found. Please set GEMINI_API_KEY.")
+
+class AzureAIError(Exception):
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "service": "ai-service",
+        "status": "ok",
+        "provider": "azure-openai",
+        "endpoint_loaded": bool(AZURE_OPENAI_ENDPOINT),
+        "key_loaded": bool(AZURE_OPENAI_API_KEY),
+        "deployment_loaded": bool(AZURE_OPENAI_DEPLOYMENT),
+    }
+
+
+@app.get("/ready")
+def readiness_check():
+    missing = missing_azure_config()
+    if missing:
+        raise HTTPException(status_code=503, detail=f"Azure OpenAI config missing: {', '.join(missing)}")
+    return {"service": "ai-service", "status": "ready", "provider": "azure-openai"}
+
+
+@app.get("/live")
+def liveness_check():
+    return {"service": "ai-service", "status": "alive"}
+
+
+@app.get("/metrics")
+def prometheus_metrics():
+    payload = "\n".join(
+        [
+            "# HELP ai_service_requests_total Total HTTP requests handled by AI service.",
+            "# TYPE ai_service_requests_total counter",
+            f"ai_service_requests_total {REQUEST_COUNT}",
+            "# HELP ai_service_request_latency_seconds_total Cumulative request latency.",
+            "# TYPE ai_service_request_latency_seconds_total counter",
+            f"ai_service_request_latency_seconds_total {REQUEST_LATENCY_SECONDS:.6f}",
+            "",
+        ]
+    )
+    return Response(content=payload, media_type="text/plain; version=0.0.4")
+
+
+def missing_azure_config() -> list[str]:
+    missing = []
+    if not AZURE_OPENAI_ENDPOINT:
+        missing.append("AZURE_OPENAI_ENDPOINT")
+    if not AZURE_OPENAI_API_KEY:
+        missing.append("AZURE_OPENAI_API_KEY")
+    if not AZURE_OPENAI_DEPLOYMENT:
+        missing.append("AZURE_OPENAI_DEPLOYMENT")
+    if not AZURE_OPENAI_API_VERSION:
+        missing.append("AZURE_OPENAI_API_VERSION")
+    return missing
+
+
+def azure_chat_completion(messages: list[dict], max_tokens: int = 1800, temperature: float = 0.2) -> str:
+    missing = missing_azure_config()
+    if missing:
+        raise AzureAIError(500, f"Azure OpenAI config missing: {', '.join(missing)}")
+
+    url = (
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}"
+        f"/chat/completions?api-version={AZURE_OPENAI_API_VERSION}"
+    )
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "api-key": AZURE_OPENAI_API_KEY,
+        },
+        method="POST",
+    )
 
     try:
-        prompt = f"Review this code and provide fixes:\n{request.code}"
-        response = model.generate_content(prompt)
-        review_output = response.text
-        
-        fixed_code = ""
-        if "```python" in response.text:
-            try:
-                fixed_code = response.text.split("```python")[1].split("```")[0].strip()
-            except IndexError:
-                pass
-                
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise AzureAIError(exc.code, parse_azure_error(detail))
+    except urllib.error.URLError as exc:
+        raise AzureAIError(503, f"Unable to connect to Azure OpenAI: {exc.reason}")
+
+    try:
+        return data["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError):
+        raise AzureAIError(502, "Azure OpenAI returned an unexpected response.")
+
+
+def parse_azure_error(detail: str) -> str:
+    try:
+        payload = json.loads(detail)
+        error = payload.get("error", {})
+        message = error.get("message") or detail
+        code = error.get("code")
+        return f"{code}: {message}" if code else message
+    except json.JSONDecodeError:
+        return detail or "Azure OpenAI request failed."
+
+
+def extract_valid_python_block(text: str) -> str:
+    blocks = []
+    marker = "```python"
+    search_from = 0
+    while marker in text[search_from:]:
+        start = text.find(marker, search_from) + len(marker)
+        end = text.find("```", start)
+        if end == -1:
+            break
+        block = text[start:end].strip()
+        blocks.append(block)
+        search_from = end + 3
+
+    for block in reversed(blocks):
+        if is_valid_runnable_python(block):
+            return block
+    return ""
+
+
+def is_valid_runnable_python(code: str) -> bool:
+    if not code.strip():
+        return False
+    try:
+        ast.parse(code)
+    except SyntaxError:
+        return False
+    return True
+
+
+def friendly_ai_error(exc: Exception) -> tuple[int, str]:
+    if isinstance(exc, AzureAIError):
+        status_code = exc.status_code
+        message = exc.message
+    else:
+        status_code = 500
+        message = str(exc)
+
+    lowered = message.lower()
+    if status_code == 401 or "unauthorized" in lowered or "access denied" in lowered:
+        return 401, "Azure OpenAI authentication failed. Check AZURE_OPENAI_API_KEY."
+    if status_code == 404 or "deployment" in lowered and "not found" in lowered:
+        return 404, "Azure OpenAI deployment was not found. Check AZURE_OPENAI_DEPLOYMENT and region."
+    if status_code == 429 or "quota" in lowered or "rate" in lowered:
+        return 429, "Azure OpenAI quota or rate limit reached. Retry later or increase quota in Azure."
+    return status_code, message
+
+
+@app.post("/review", response_model=ReviewResponse)
+def review_code(request: ReviewRequest):
+    started = time.perf_counter()
+    try:
+        prompt = f"""Review this code in simple words and provide a minimal fix.
+
+Include these sections:
+- Problems Found
+- Simple Suggestions
+- Corrected Code
+
+For the corrected code:
+- Return a compact runnable Python version.
+- Keep the same behavior as the user's code.
+- Do not add unnecessary classes, services, menus, config files, comments, frameworks, or advanced patterns.
+- Put the final code in exactly one ```python code block under "Corrected Code".
+
+Code:
+{request.code}
+"""
+        review_output = azure_chat_completion(
+            [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ]
+        )
+        fixed_code = extract_valid_python_block(review_output)
+
+        elapsed = time.perf_counter() - started
+        logger.info(
+            json.dumps(
+                {
+                    "event": "review_completed",
+                    "provider": "azure-openai",
+                    "deployment": AZURE_OPENAI_DEPLOYMENT,
+                    "duration_ms": round(elapsed * 1000, 2),
+                    "input_chars": len(request.code),
+                    "fixed_code_chars": len(fixed_code),
+                }
+            )
+        )
         return {"review_output": review_output, "fixed_code": fixed_code}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        logger.exception(
+            json.dumps({"event": "review_failed", "duration_ms": round((time.perf_counter() - started) * 1000, 2)})
+        )
+        status_code, detail = friendly_ai_error(exc)
+        raise HTTPException(status_code=status_code, detail=detail)
+
 
 @app.post("/extract")
 async def extract_code(file: UploadFile = File(...)):
-    if not key:
-        raise HTTPException(status_code=500, detail="Gemini API key not found. Please set GEMINI_API_KEY.")
-
     try:
         image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        
-        response = model2.generate_content([
-            "Extract only the programming code from this image.Do NOT include explanations, comments, or extra text. Just return the raw python code: ", 
-            image
-        ])
-        
-        extracted_code = response.text.strip() if response.text else ""
-        return {"extracted_code": extracted_code}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        content_type = file.content_type or "image/png"
+        encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:{content_type};base64,{encoded_image}"
+        extracted_code = azure_chat_completion(
+            [
+                {"role": "system", "content": EXTRACT_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": EXTRACT_PROMPT},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            max_tokens=1200,
+            temperature=0,
+        )
+        return {"extracted_code": extracted_code.strip()}
+    except Exception as exc:
+        status_code, detail = friendly_ai_error(exc)
+        raise HTTPException(status_code=status_code, detail=detail)

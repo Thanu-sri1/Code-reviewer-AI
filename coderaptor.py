@@ -1,6 +1,5 @@
 import streamlit as st
 import requests
-import google.generativeai as genai
 import subprocess
 from streamlit_ace import st_ace
 import uuid
@@ -8,6 +7,10 @@ from datetime import datetime
 import sqlite3
 import hashlib
 import os
+import base64
+import json
+import urllib.error
+import urllib.request
 from PIL import Image
 # import pytesseract
 import io
@@ -24,10 +27,59 @@ def is_valid_python_code(text):
         return False
 
 
-key = os.getenv("GEMINI_API_KEY")  
-if not key:
-    st.error("Gemini API key not found. Please set GEMINI_API_KEY as an environment variable.")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip().rstrip("/")
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
+AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "").strip()
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview").strip()
+
+if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_API_KEY or not AZURE_OPENAI_DEPLOYMENT:
+    st.error("Azure OpenAI settings are missing. Please set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.")
     st.stop()
+
+
+def azure_chat_completion(messages, max_tokens=1800, temperature=0.2):
+    url = (
+        f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT}"
+        f"/chat/completions?api-version={AZURE_OPENAI_API_VERSION}"
+    )
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "api-key": AZURE_OPENAI_API_KEY,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        return data["choices"][0]["message"]["content"] or ""
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        try:
+            message = json.loads(detail).get("error", {}).get("message", detail)
+        except json.JSONDecodeError:
+            message = detail
+        raise RuntimeError(message)
+    except Exception as exc:
+        raise RuntimeError(str(exc))
+
+
+def extract_valid_python_block(text):
+    marker = "```python"
+    if marker not in text:
+        return ""
+    try:
+        block = text.split(marker, 1)[1].split("```", 1)[0].strip()
+    except IndexError:
+        return ""
+    return block if is_valid_python_code(block) else ""
 
 # Database setup
 def init_db():
@@ -109,18 +161,27 @@ def save_review(username, tab_id, tab_data):
     conn.commit()
     conn.close()
 
-# Function to extract code using Gemini AI
+# Function to extract code using Azure AI
 def extract_code_from_image_with_genai(uploaded_image):
     try:
-        # Read the image file as bytes
-        image = Image.open(io.BytesIO(uploaded_image.getvalue()))
-
-        # Send image to Gemini AI for processing
-        response = model2.generate_content(["Extract only the programming code from this image.Do NOT include explanations, comments, or extra text. Just return the raw python code: ", image])
-
-        extracted_code = response.text.strip() if response.text else ""
-
-        return extracted_code
+        image_bytes = uploaded_image.getvalue()
+        content_type = uploaded_image.type or "image/png"
+        encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:{content_type};base64,{encoded_image}"
+        return azure_chat_completion(
+            [
+                {"role": "system", "content": system_prompt2},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": system_prompt2},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            max_tokens=1200,
+            temperature=0,
+        ).strip()
 
     except Exception as e:
         st.error(f"Error extracting code from image using AI: {str(e)}")
@@ -183,16 +244,29 @@ def init_session_state():
 
 # Core application functions
 def review_code(code, tab_id):
-    """Send code to Gemini AI for review and store response."""
+    """Send code to Azure AI for review and store response."""
     try:
-        prompt = f"Review this code and provide fixes:\n{code}"
-        response = model.generate_content(prompt)
-        st.session_state["tabs"][tab_id]["review_output"] = response.text
+        prompt = f"""Review this code in simple words and provide a minimal fix.
 
-        if "```python" in response.text:
-            fixed_code = response.text.split("```python")[1].split("```")[0].strip()
-            if fixed_code:
-                st.session_state["tabs"][tab_id]["fixed_code"] = fixed_code
+Include these sections:
+- Problems Found
+- Simple Suggestions
+- Corrected Code
+
+Code:
+{code}
+"""
+        review_output = azure_chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+        )
+        st.session_state["tabs"][tab_id]["review_output"] = review_output
+
+        fixed_code = extract_valid_python_block(review_output)
+        if fixed_code:
+            st.session_state["tabs"][tab_id]["fixed_code"] = fixed_code
         
         if st.session_state.get('username'):
             save_review(st.session_state['username'], tab_id, st.session_state["tabs"][tab_id])
@@ -249,64 +323,21 @@ def get_sorted_tabs():
 init_db()
 init_session_state()
 
-# Load Gemini API key and configure model
-# try:
-#     with open(".gemini.txt", "r") as file:
-#         key = file.read().strip()
-# except FileNotFoundError:
-#     st.error("Gemini API key not found. Please create .gemini.txt file with your API key.")
-#     st.stop()
-
-# System prompt for Gemini
-system_prompt = """You are a code reviewer specializing in Python. Your task is to:
-- Analyze submitted code.
-- Identify potential bugs or errors.
-- Suggest optimizations or improvements.
-- Provide the corrected version in Python if the code is in another language.
-
-🔍 **Response Structure**:
-1️⃣ **Bug/Error Identification**
-   - Detect errors in the provided code.
-   - If it's **not Python**, identify the language and explain syntax differences.
-   
-2️⃣ **Suggested Fixes/Optimizations**
-   - Recommend fixes for errors.
-   - If the code is in another language, show the **correct equivalent in Python**.
-
-3️⃣ **Corrected Code**
-   - Provide the correct **Python version**.
-   - Ensure it's fully functional and valid.
-   - Explain the changes.
-
-📌 **Important**:
-- If the code is in Java, C++, JavaScript, etc., explain how to translate it into Python.
-- DO NOT reject non-Python code; instead, analyze it and convert it if possible.
-- Always wrap the corrected Python code in triple backticks with 'python' language identifier.
+# Azure AI review prompt
+system_prompt = """You are a helpful Python code reviewer. Explain problems in simple words.
+Find bugs, risky code, slow code, unused variables, and confusing functions.
+Give short suggestions for memory use, speed, readability, and structure.
+Return one compact corrected Python version only when a clear fix is needed.
+Do not rewrite the code into a large framework, class hierarchy, menu, or template.
+Always wrap only the corrected Python code in triple backticks with the python language identifier.
 """
 
 
-system_prompt2 = """📌 Role: You are an advanced AI model specialized in extracting raw programming code from images.
-
-🎯 Task:
-
-    Extract only the programming code from the given image.
-    Do NOT include explanations, comments, or any extra text.
-    Do NOT format the output as markdown, JSON, or any other structured format—just return the plain code.
-    Preserve indentation, special characters, and syntax exactly as seen in the image.
-
-⚠️ Restrictions:
-    
-    Do not add headers, footers, or descriptions.
-    Do not modify, interpret, or translate the code.
-    If the image contains multiple code snippets, extract them in the same order as they appear.
-    if it doesn't contain any code just return a polite request to include a photo that contains code.
-
-✅ Expected Output:
-    
-    The raw programming code extracted as plain text, exactly as shown in the image."""
-genai.configure(api_key=key)
-model = genai.GenerativeModel("gemini-2.0-flash-exp", system_instruction=system_prompt)
-model2 = genai.GenerativeModel("gemini-2.0-flash-exp", system_instruction=system_prompt2)
+system_prompt2 = """Extract only the programming code from this image.
+Do not include explanations, comments, markdown, JSON, headers, or extra text.
+Preserve indentation, special characters, and syntax exactly as seen in the image.
+If the image does not contain code, return: No code detected in the image.
+"""
 
 
 def show_about():
@@ -558,5 +589,4 @@ with chat_container:
             if st.button("Apply Fixed Code", key=f"apply_{current_tab}"):
                 apply_fixed_code(current_tab)
                 st.rerun()
-
 

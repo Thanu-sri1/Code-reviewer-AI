@@ -1,18 +1,60 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr
 import hashlib
+import json
+import logging
 import os
 import time
 import psycopg2
 from psycopg2 import errors
 
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format='{"timestamp":"%(asctime)s","level":"%(levelname)s","service":"auth-service","message":"%(message)s"}',
+)
+logger = logging.getLogger("auth-service")
+
 app = FastAPI(title="Auth Service")
+REQUEST_COUNT = 0
+REQUEST_LATENCY_SECONDS = 0.0
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
+
+@app.middleware("http")
+async def track_requests(request, call_next):
+    global REQUEST_COUNT, REQUEST_LATENCY_SECONDS
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - started
+    REQUEST_COUNT += 1
+    REQUEST_LATENCY_SECONDS += elapsed
+    logger.info(json.dumps({"event": "request_completed", "path": request.url.path, "status_code": response.status_code, "duration_ms": round(elapsed * 1000, 2)}))
+    return response
 
 @app.get("/health")
 def health_check():
     return {"service": "auth-service", "status": "ok"}
+
+@app.get("/ready")
+def readiness_check():
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        return {"service": "auth-service", "status": "ready"}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+@app.get("/live")
+def liveness_check():
+    return {"service": "auth-service", "status": "alive"}
+
+@app.get("/metrics")
+def prometheus_metrics():
+    return Response(
+        content=f"auth_service_requests_total {REQUEST_COUNT}\nauth_service_request_latency_seconds_total {REQUEST_LATENCY_SECONDS:.6f}\n",
+        media_type="text/plain; version=0.0.4",
+    )
 
 def init_db():
     with get_db_connection() as conn:
