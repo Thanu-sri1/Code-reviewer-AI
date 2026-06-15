@@ -21,7 +21,19 @@ logger = logging.getLogger("review-service")
 
 app = FastAPI(title="Review Management Service")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
+def read_config_value(name: str, default: str = "") -> str:
+    value = (os.getenv(name) or "").strip().strip("\"'")
+    if value:
+        return value
+
+    file_path = os.getenv(f"{name}_FILE") or f"/mnt/secrets-store/{name}"
+    if os.path.exists(file_path):
+        return open(file_path).read().strip().strip("\"'")
+
+    return default
+
+
+DATABASE_URL = read_config_value("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
 REQUEST_COUNT = 0
 REQUEST_LATENCY_SECONDS = 0.0
 
@@ -96,8 +108,10 @@ def init_db():
                     review_output TEXT,
                     run_output TEXT,
                     fixed_code TEXT,
+                    fixed_code_language TEXT NOT NULL DEFAULT 'python',
                     timestamp TEXT)"""
             )
+            cur.execute("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS fixed_code_language TEXT NOT NULL DEFAULT 'python'")
             cur.execute(
                 """CREATE TABLE IF NOT EXISTS repository_metrics
                    (repository_id TEXT PRIMARY KEY REFERENCES reviews(id) ON DELETE CASCADE,
@@ -172,6 +186,7 @@ class ReviewData(BaseModel):
     review_output: str
     run_output: str
     fixed_code: str
+    fixed_code_language: str = "python"
     timestamp: str
 
 
@@ -180,7 +195,7 @@ def get_reviews(username: str):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, code, review_output, run_output, fixed_code, timestamp
+                """SELECT id, code, review_output, run_output, fixed_code, fixed_code_language, timestamp
                    FROM reviews WHERE username=%s ORDER BY timestamp DESC""",
                 (username,),
             )
@@ -194,7 +209,8 @@ def get_reviews(username: str):
             "review_output": review[2],
             "run_output": review[3],
             "fixed_code": review[4],
-            "timestamp": review[5],
+            "fixed_code_language": review[5],
+            "timestamp": review[6],
             "editor_key": 0,
             "analysis": get_repository_bundle(repository_id, raise_missing=False),
         }
@@ -209,14 +225,15 @@ def save_review(username: str, review: ReviewData):
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO reviews
-                   (id, username, code, review_output, run_output, fixed_code, timestamp)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   (id, username, code, review_output, run_output, fixed_code, fixed_code_language, timestamp)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (id) DO UPDATE SET
                    username = EXCLUDED.username,
                    code = EXCLUDED.code,
                    review_output = EXCLUDED.review_output,
                    run_output = EXCLUDED.run_output,
                    fixed_code = EXCLUDED.fixed_code,
+                   fixed_code_language = EXCLUDED.fixed_code_language,
                    timestamp = EXCLUDED.timestamp""",
                 (
                     review.id,
@@ -225,6 +242,7 @@ def save_review(username: str, review: ReviewData):
                     review.review_output,
                     review.run_output,
                     review.fixed_code,
+                    review.fixed_code_language,
                     review.timestamp,
                 ),
             )

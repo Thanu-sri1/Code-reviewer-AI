@@ -17,6 +17,13 @@ EXECUTION_SERVICE_URL = os.getenv("EXECUTION_SERVICE_URL", "http://localhost:800
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8003")
 REVIEW_SERVICE_URL = os.getenv("REVIEW_SERVICE_URL", "http://localhost:8004")
 AUTH_REQUIRED_MESSAGE = "Please login or register before using code review, file upload, or code execution."
+LANGUAGE_OPTIONS = ["python", "java", "javascript", "yaml"]
+LANGUAGE_LABELS = {
+    "python": "Python",
+    "java": "Java",
+    "javascript": "JavaScript",
+    "yaml": "YAML",
+}
 
 
 def inject_dashboard_styles():
@@ -99,7 +106,14 @@ def load_user_reviews(username):
     try:
         response = requests.get(f"{REVIEW_SERVICE_URL}/reviews/{username}")
         if response.status_code == 200:
-            return response.json()
+            tabs = response.json()
+            for tab_data in tabs.values():
+                fixed_language = normalize_code_language(tab_data.get("fixed_code_language", "python"))
+                if tab_data.get("fixed_code") and tab_data.get("code") == tab_data.get("fixed_code"):
+                    tab_data["code_language"] = fixed_language
+                else:
+                    tab_data.setdefault("code_language", "python")
+            return tabs
         return {}
     except requests.ConnectionError:
         st.error("Review Service is unreachable.")
@@ -116,6 +130,7 @@ def save_review(username, tab_id, tab_data):
             "review_output": tab_data["review_output"],
             "run_output": tab_data["run_output"],
             "fixed_code": tab_data["fixed_code"],
+            "fixed_code_language": tab_data.get("fixed_code_language", "python"),
             "timestamp": tab_data["timestamp"],
         }
         response = requests.post(f"{REVIEW_SERVICE_URL}/reviews/{username}", json=payload)
@@ -137,6 +152,8 @@ def create_new_tab():
         "review_output": "",
         "run_output": "",
         "fixed_code": "",
+        "fixed_code_language": "python",
+        "code_language": "python",
         "analysis": None,
         "editor_key": 0,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -178,9 +195,12 @@ def extract_code_from_image_with_genai(uploaded_image):
         return ""
 
 
-def run_code(code, tab_id):
+def run_code(code, tab_id, language="python"):
     try:
-        response = requests.post(f"{EXECUTION_SERVICE_URL}/run", json={"code": code, "tab_id": tab_id})
+        response = requests.post(
+            f"{EXECUTION_SERVICE_URL}/run",
+            json={"code": code, "tab_id": tab_id, "language": normalize_code_language(language)},
+        )
         if response.status_code == 200:
             return response.json().get("output", "")
         return f"Error from Execution Service: {response.text}"
@@ -241,6 +261,34 @@ def numeric_score(value):
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def normalize_code_language(language):
+    language = (language or "text").strip().lower()
+    aliases = {
+        "py": "python",
+        "yml": "yaml",
+        "js": "javascript",
+        "ts": "typescript",
+        "c++": "cpp",
+    }
+    return aliases.get(language, language or "text")
+
+
+def is_python_language(language):
+    return normalize_code_language(language) == "python"
+
+
+def language_from_filename(filename):
+    suffix = os.path.splitext(filename or "")[1].lower()
+    mapping = {
+        ".py": "python",
+        ".java": "java",
+        ".js": "javascript",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+    }
+    return mapping.get(suffix, "python")
 
 
 def score_color(score):
@@ -307,6 +355,7 @@ def build_review_report(tab_id, tab_data):
     health = analysis.get("health", {})
     recommendations = get_recommendations_section(analysis)
     diff = build_code_diff(tab_data.get("code", ""), tab_data.get("fixed_code", ""))
+    fixed_code_language = normalize_code_language(tab_data.get("fixed_code_language", "python"))
 
     lines = [
         "# Code Raptor Review Report",
@@ -365,7 +414,7 @@ def build_review_report(tab_id, tab_data):
     lines.extend(["", "## Fixed Code Diff", "", "```diff", diff or "No fixed-code diff available.", "```"])
 
     if tab_data.get("fixed_code"):
-        lines.extend(["", "## Fixed Code", "", "```python", tab_data["fixed_code"], "```"])
+        lines.extend(["", "## Fixed Code", "", f"```{fixed_code_language}", tab_data["fixed_code"], "```"])
 
     if tab_data.get("run_output"):
         lines.extend(["", "## Last Run Output", "", "```text", tab_data["run_output"], "```"])
@@ -449,12 +498,15 @@ def review_code(code, tab_id):
             data = response.json()
             st.session_state["tabs"][tab_id]["review_output"] = data.get("review_output", "")
             fixed_code = data.get("fixed_code", "")
-            if fixed_code and is_valid_python_code(fixed_code):
+            fixed_code_language = normalize_code_language(data.get("fixed_code_language", "text"))
+            if fixed_code and (not is_python_language(fixed_code_language) or is_valid_python_code(fixed_code)):
                 st.session_state["tabs"][tab_id]["fixed_code"] = fixed_code
+                st.session_state["tabs"][tab_id]["fixed_code_language"] = fixed_code_language
             else:
                 st.session_state["tabs"][tab_id]["fixed_code"] = ""
+                st.session_state["tabs"][tab_id]["fixed_code_language"] = fixed_code_language
                 if fixed_code:
-                    st.warning("The AI reviewer returned code that was not valid Python, so it was not applied.")
+                    st.warning("The AI reviewer returned invalid Python, so it was not applied.")
 
             if st.session_state.get("username"):
                 save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
@@ -465,6 +517,7 @@ def review_code(code, tab_id):
             if analysis:
                 st.session_state["tabs"][tab_id]["review_output"] = build_static_review_feedback(analysis, reason)
                 st.session_state["tabs"][tab_id]["fixed_code"] = ""
+                st.session_state["tabs"][tab_id]["fixed_code_language"] = "text"
                 save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
                 st.warning(reason)
             else:
@@ -495,18 +548,20 @@ def init_session_state():
 
 def apply_fixed_code(tab_id, run_after_apply=False):
     fixed_code = st.session_state["tabs"][tab_id]["fixed_code"]
+    fixed_code_language = normalize_code_language(st.session_state["tabs"][tab_id].get("fixed_code_language", "python"))
     if not fixed_code:
         st.warning("No fixed code is available to apply.")
         return
-    if not is_valid_python_code(fixed_code):
+    if is_python_language(fixed_code_language) and not is_valid_python_code(fixed_code):
         st.error("The suggested fixed code is not valid Python, so it was not applied.")
         return
 
     st.session_state["tabs"][tab_id]["code"] = fixed_code
+    st.session_state["tabs"][tab_id]["code_language"] = fixed_code_language
     st.session_state["tabs"][tab_id]["editor_key"] += 1
 
     if run_after_apply:
-        st.session_state["tabs"][tab_id]["run_output"] = run_code(fixed_code, tab_id)
+        st.session_state["tabs"][tab_id]["run_output"] = run_code(fixed_code, tab_id, fixed_code_language)
 
     if st.session_state.get("username"):
         save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
@@ -784,8 +839,9 @@ def handle_upload(uploaded_file):
         return
 
     file_type = uploaded_file.type
+    uploaded_language = language_from_filename(uploaded_file.name)
 
-    if file_type == "text/x-python":
+    if uploaded_file.name.lower().endswith((".py", ".java", ".js", ".yaml", ".yml")):
         new_code = uploaded_file.read().decode("utf-8")
         code_hash = hashlib.md5(new_code.encode()).hexdigest()
 
@@ -793,12 +849,13 @@ def handle_upload(uploaded_file):
             if new_code:
                 tab_id = st.session_state["current_tab"]
                 st.session_state["tabs"][tab_id]["code"] = new_code
+                st.session_state["tabs"][tab_id]["code_language"] = uploaded_language
                 st.session_state["tabs"][tab_id]["editor_key"] += 1
                 if st.session_state.get("username"):
                     save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
 
                 st.session_state["last_processed_code_hash"] = code_hash
-                st.success("Python file uploaded and code updated in the editor.")
+                st.success(f"{LANGUAGE_LABELS.get(uploaded_language, uploaded_language)} file uploaded and code updated in the editor.")
                 st.rerun()
             else:
                 st.warning("No code detected in the uploaded file.")
@@ -842,15 +899,32 @@ def show_review_page():
 
     st.title("Code Review")
 
+    current_language = normalize_code_language(current_tab_data.get("code_language", "python"))
+    if current_language not in LANGUAGE_OPTIONS:
+        current_language = "python"
+    selected_language = st.selectbox(
+        "Code language",
+        LANGUAGE_OPTIONS,
+        index=LANGUAGE_OPTIONS.index(current_language),
+        format_func=lambda item: LANGUAGE_LABELS.get(item, item.title()),
+        key=f"language_{current_tab}",
+    )
+    if selected_language != current_tab_data.get("code_language", "python"):
+        st.session_state["tabs"][current_tab]["code_language"] = selected_language
+        current_tab_data["code_language"] = selected_language
+        if st.session_state.get("username"):
+            save_review(st.session_state["username"], current_tab, st.session_state["tabs"][current_tab])
+
+    editor_language = normalize_code_language(current_tab_data.get("code_language", selected_language))
     code = st_ace(
-        language="python",
+        language=editor_language,
         theme="monokai",
         height=300,
         value=current_tab_data["code"],
         key=f"editor_{current_tab}_{current_tab_data['editor_key']}",
     )
 
-    uploaded_file = st.file_uploader("Upload a file (Python or Image)", type=["py", "png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader("Upload a file (Code or Image)", type=["py", "java", "js", "yaml", "yml", "png", "jpg", "jpeg"])
     st.caption("For images, wait while the app extracts code. To edit manually after upload, clear the uploaded file.")
 
     if uploaded_file is not None:
@@ -859,6 +933,7 @@ def show_review_page():
     if code != current_tab_data["code"]:
         if st.session_state.get("username"):
             st.session_state["tabs"][current_tab]["code"] = code
+            st.session_state["tabs"][current_tab]["code_language"] = selected_language
             save_review(st.session_state["username"], current_tab, st.session_state["tabs"][current_tab])
         else:
             st.warning(AUTH_REQUIRED_MESSAGE)
@@ -869,7 +944,8 @@ def show_review_page():
             if not st.session_state.get("username"):
                 st.warning(AUTH_REQUIRED_MESSAGE)
             elif code.strip():
-                result = run_code(code, current_tab)
+                current_language = normalize_code_language(st.session_state["tabs"][current_tab].get("code_language", "python"))
+                result = run_code(code, current_tab, current_language)
                 st.session_state["tabs"][current_tab]["run_output"] = result
                 if st.session_state.get("username"):
                     save_review(st.session_state["username"], current_tab, st.session_state["tabs"][current_tab])
@@ -894,21 +970,23 @@ def show_review_page():
         st.markdown(current_tab_data["review_output"])
 
         if current_tab_data["fixed_code"]:
+            fixed_code_language = normalize_code_language(current_tab_data.get("fixed_code_language", "python"))
             st.markdown("#### Fixed Code Review")
             preview_tab, diff_tab = st.tabs(["Before and After", "Exact Changes"])
             with preview_tab:
                 before_col, after_col = st.columns(2)
                 with before_col:
                     st.caption("Current Code")
-                    st.code(current_tab_data["code"], language="python")
+                    st.code(current_tab_data["code"], language=fixed_code_language)
                 with after_col:
-                    st.caption("Fixed Code")
-                    st.code(current_tab_data["fixed_code"], language="python")
+                    st.caption(f"Fixed Code ({fixed_code_language})")
+                    st.code(current_tab_data["fixed_code"], language=fixed_code_language)
             with diff_tab:
                 diff = build_code_diff(current_tab_data["code"], current_tab_data["fixed_code"])
                 st.code(diff or "No differences detected.", language="diff")
 
-            if st.button("Apply & Run Fixed Code", key=f"apply_{current_tab}"):
+            button_label = "Apply & Run Fixed Code" if fixed_code_language != "yaml" else "Apply & Validate YAML"
+            if st.button(button_label, key=f"apply_{current_tab}"):
                 apply_fixed_code(current_tab, run_after_apply=True)
                 st.rerun()
 

@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-service
+  namespace: coderaptor
+  labels:
+    app: ai-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-service
+  template:
+    metadata:
+      labels:
+        app: ai-service
+    spec:
+      containers:
+        - name: ai-service
+          image: <ACR_LOGIN_SERVER>/ai-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8003
+          env:
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: coderaptor-config
+                  key: LOG_LEVEL
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8003
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+      volumes:
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: coderaptor-keyvault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+  namespace: coderaptor
+  labels:
+    app: ai-service
+spec:
+  type: ClusterIP
+  selector:
+    app: ai-service
+  ports:
+    - name: http
+      port: 8003
+      targetPort: 8003

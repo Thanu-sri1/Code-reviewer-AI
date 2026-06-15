@@ -12,7 +12,8 @@ Users can:
 - paste or upload Python code
 - upload an image that contains code
 - extract code from the image using Azure AI
-- run Python code safely through a separate execution service
+- run Python, Java, and JavaScript code through a separate execution service
+- validate YAML syntax through the execution service
 - ask Azure AI to review the code
 - apply the fixed code
 - view code health metrics such as variables, functions, memory safety, speed score, cleanup needed, and overall health
@@ -46,7 +47,7 @@ The main application uses the microservices and `frontend/app.py`. The older `co
 |---|---|---:|---|
 | Frontend | `frontend/` | `8501` | User interface built with Streamlit |
 | Auth Service | `auth_service/` | `8001` | User registration and login |
-| Execution Service | `execution_service/` | `8002` | Runs Python code and returns output |
+| Execution Service | `execution_service/` | `8002` | Runs Python, Java, JavaScript, and validates YAML |
 | AI Service | `ai_service/` | `8003` | Sends review/extraction requests to Azure OpenAI |
 | Review Service | `review_service/` | `8004` | Saves review history and stores metrics |
 | PostgreSQL | Docker image | `5432` | Shared database for auth and review data |
@@ -270,9 +271,9 @@ Port:
 
 Responsibilities:
 
-- receives Python code
+- receives code and a language name
 - writes it to a temporary `.py` file
-- runs it using `python3`
+- runs it using the matching runtime when supported
 - captures output and errors
 - deletes the temporary file
 
@@ -287,7 +288,8 @@ Request:
 ```json
 {
   "code": "print('Hello')",
-  "tab_id": "test"
+  "tab_id": "test",
+  "language": "python"
 }
 ```
 
@@ -305,6 +307,16 @@ Safety behavior:
 - temporary file is removed after execution
 - stdout and stderr are both returned
 - if code prints nothing, the service returns a friendly success message
+
+Supported execution behavior:
+
+| Language | Behavior |
+|---|---|
+| Python | Runs with `python3` |
+| Java | Compiles with `javac`, then runs with `java` |
+| JavaScript | Runs with `node` |
+| YAML | Validates YAML syntax and reports top-level keys |
+| Other languages | Returns a clear unsupported-language message |
 
 ## 10. AI Service
 
@@ -330,7 +342,7 @@ Responsibilities:
 
 - sends code review requests to Azure OpenAI
 - sends image extraction requests to Azure OpenAI vision-capable deployment
-- extracts valid Python fixed code from AI response
+- extracts corrected code from AI response and keeps the original language label
 - handles Azure errors in a user-friendly way
 
 Provider:
@@ -554,7 +566,7 @@ User pastes code
   -> Frontend calls AI Service /review
   -> AI Service sends prompt to Azure OpenAI
   -> Azure returns review text and corrected code
-  -> AI Service extracts valid Python fixed code
+  -> AI Service extracts corrected code with its language, such as python, java, or yaml
   -> Frontend saves review through Review Service
   -> Review Service runs local analyzer
   -> Review Service stores metrics in PostgreSQL
@@ -565,7 +577,7 @@ User pastes code
 
 ```text
 User clicks Apply & Run Fixed Code
-  -> Frontend validates fixed code
+  -> Frontend validates Python fixed code and preserves non-Python code as text/source
   -> Frontend replaces editor code
   -> Frontend calls Execution Service /run
   -> Execution Service runs code
@@ -579,7 +591,7 @@ User clicks Apply & Run Fixed Code
 User clicks Run Code
   -> Frontend calls Execution Service /run
   -> Execution Service writes code to temp file
-  -> Execution Service runs python3
+  -> Execution Service uses the selected language runtime
   -> Execution Service returns stdout/stderr
   -> Frontend displays output
 ```
@@ -620,6 +632,45 @@ Open:
 ```text
 http://localhost:8501
 ```
+
+## 15.1 AKS Deployment With Azure Key Vault
+
+Kubernetes manifests are stored in:
+
+```text
+k8s/
+```
+
+The AKS deployment uses Azure Key Vault through the Secrets Store CSI driver. Secrets are mounted into pods at:
+
+```text
+/mnt/secrets-store
+```
+
+The services read these files automatically:
+
+```text
+AZURE_OPENAI_ENDPOINT
+AZURE_OPENAI_API_KEY
+AZURE_OPENAI_DEPLOYMENT
+AZURE_OPENAI_API_VERSION
+DATABASE_URL
+POSTGRES_PASSWORD
+```
+
+Start with this guide:
+
+```text
+k8s/README_AKS_KEYVAULT.md
+```
+
+Deploy after replacing placeholders:
+
+```bash
+kubectl apply -k k8s/
+```
+
+The frontend is exposed through a Kubernetes `LoadBalancer` service.
 
 ## 16. How To Check Each Service
 

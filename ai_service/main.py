@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -50,6 +51,10 @@ def read_env_value(name: str) -> str:
     if value:
         return value
 
+    file_path = os.getenv(f"{name}_FILE") or f"/mnt/secrets-store/{name}"
+    if Path(file_path).exists():
+        return Path(file_path).read_text().strip().strip("\"'")
+
     for env_path in (Path.cwd() / ".env", Path.cwd().parent / ".env", Path(__file__).resolve().parent.parent / ".env"):
         if not env_path.exists():
             continue
@@ -70,11 +75,11 @@ AZURE_OPENAI_DEPLOYMENT = read_env_value("AZURE_OPENAI_DEPLOYMENT")
 AZURE_OPENAI_API_VERSION = read_env_value("AZURE_OPENAI_API_VERSION") or "2025-01-01-preview"
 
 
-SYSTEM_PROMPT = """You are a helpful Python code reviewer. Your task is to:
+SYSTEM_PROMPT = """You are a helpful code reviewer. Your task is to:
 - Explain problems in simple words that students and beginners can understand.
 - Find bugs, risky code, slow code, unused variables, and confusing functions.
 - Suggest simple improvements for memory use, speed, readability, and structure.
-- Provide a corrected Python version only when a clear fix is needed.
+- Provide corrected code only when a clear fix is needed.
 
 Response format:
 1. Problems Found
@@ -87,7 +92,11 @@ Response format:
    - Avoid unnecessary theory.
 
 3. Corrected Code
-   - Provide one compact, corrected Python version.
+   - First identify the input language.
+   - Provide one compact corrected version in the same language as the user's input.
+   - If the input is YAML, return YAML in a yaml code block.
+   - If the input is Java, return Java in a java code block.
+   - If the input is Python, return Python in a python code block.
    - Preserve the user's original purpose and style as much as possible.
    - Fix only what is needed.
    - Do not rewrite the code into a large framework, class hierarchy, CLI app, or production template.
@@ -95,10 +104,9 @@ Response format:
    - Explain changes outside the code block.
 
 Important:
-- If the code is in Java, C++, JavaScript, etc., explain how to translate it into Python.
-- Do not reject non-Python code; analyze it and convert it if possible.
-- Put the final corrected runnable Python code in exactly one section titled "Corrected Code".
-- Wrap only the corrected Python code in triple backticks with the python language identifier.
+- Do not convert YAML, Java, JavaScript, C++, or any other language into Python unless the user explicitly asks for conversion.
+- Put the final corrected code in exactly one section titled "Corrected Code".
+- Wrap only the corrected code in one fenced code block with the correct language identifier.
 """
 
 EXTRACT_PROMPT = """Extract only the programming code from this image.
@@ -115,6 +123,7 @@ class ReviewRequest(BaseModel):
 class ReviewResponse(BaseModel):
     review_output: str
     fixed_code: str
+    fixed_code_language: str = "text"
 
 
 class AzureAIError(Exception):
@@ -228,23 +237,37 @@ def parse_azure_error(detail: str) -> str:
         return detail or "Azure OpenAI request failed."
 
 
-def extract_valid_python_block(text: str) -> str:
+def extract_corrected_code_block(text: str) -> tuple[str, str]:
     blocks = []
-    marker = "```python"
-    search_from = 0
-    while marker in text[search_from:]:
-        start = text.find(marker, search_from) + len(marker)
-        end = text.find("```", start)
-        if end == -1:
-            break
-        block = text[start:end].strip()
-        blocks.append(block)
-        search_from = end + 3
+    for match in re.finditer(r"```([A-Za-z0-9_+.-]*)\s*\n(.*?)```", text, re.DOTALL):
+        language = normalize_language(match.group(1))
+        code = match.group(2).strip()
+        if code:
+            blocks.append((language, code, match.start()))
 
-    for block in reversed(blocks):
-        if is_valid_runnable_python(block):
-            return block
-    return ""
+    if not blocks:
+        return "", "text"
+
+    corrected_index = text.lower().rfind("corrected code")
+    preferred_blocks = [block for block in blocks if corrected_index == -1 or block[2] > corrected_index]
+    for language, code, _ in reversed(preferred_blocks or blocks):
+        if language == "python" and not is_valid_runnable_python(code):
+            continue
+        return code, language
+    return "", "text"
+
+
+def normalize_language(language: str) -> str:
+    language = (language or "text").strip().lower()
+    aliases = {
+        "yml": "yaml",
+        "py": "python",
+        "js": "javascript",
+        "ts": "typescript",
+        "c++": "cpp",
+        "c#": "csharp",
+    }
+    return aliases.get(language, language or "text")
 
 
 def is_valid_runnable_python(code: str) -> bool:
@@ -287,10 +310,14 @@ Include these sections:
 - Corrected Code
 
 For the corrected code:
-- Return a compact runnable Python version.
+- Detect the input language and return corrected code in that same language.
+- For YAML, use a ```yaml code block.
+- For Java, use a ```java code block.
+- For Python, use a ```python code block.
 - Keep the same behavior as the user's code.
 - Do not add unnecessary classes, services, menus, config files, comments, frameworks, or advanced patterns.
-- Put the final code in exactly one ```python code block under "Corrected Code".
+- Do not convert YAML, Java, JavaScript, C++, or other languages into Python.
+- Put the final corrected code in exactly one fenced code block under "Corrected Code".
 
 Code:
 {request.code}
@@ -301,7 +328,7 @@ Code:
                 {"role": "user", "content": prompt},
             ]
         )
-        fixed_code = extract_valid_python_block(review_output)
+        fixed_code, fixed_code_language = extract_corrected_code_block(review_output)
 
         elapsed = time.perf_counter() - started
         logger.info(
@@ -313,10 +340,15 @@ Code:
                     "duration_ms": round(elapsed * 1000, 2),
                     "input_chars": len(request.code),
                     "fixed_code_chars": len(fixed_code),
+                    "fixed_code_language": fixed_code_language,
                 }
             )
         )
-        return {"review_output": review_output, "fixed_code": fixed_code}
+        return {
+            "review_output": review_output,
+            "fixed_code": fixed_code,
+            "fixed_code_language": fixed_code_language,
+        }
     except Exception as exc:
         logger.exception(
             json.dumps({"event": "review_failed", "duration_ms": round((time.perf_counter() - started) * 1000, 2)})

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-service
+  namespace: coderaptor
+  labels:
+    app: execution-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: execution-service
+  template:
+    metadata:
+      labels:
+        app: execution-service
+    spec:
+      containers:
+        - name: execution-service
+          image: <ACR_LOGIN_SERVER>/execution-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8002
+          env:
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: coderaptor-config
+                  key: LOG_LEVEL
+            - name: EXECUTION_TIMEOUT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: coderaptor-config
+                  key: EXECUTION_TIMEOUT_SECONDS
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 8002
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: execution-service
+  namespace: coderaptor
+  labels:
+    app: execution-service
+spec:
+  type: ClusterIP
+  selector:
+    app: execution-service
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002

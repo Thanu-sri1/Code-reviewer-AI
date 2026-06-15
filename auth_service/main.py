@@ -18,7 +18,19 @@ app = FastAPI(title="Auth Service")
 REQUEST_COUNT = 0
 REQUEST_LATENCY_SECONDS = 0.0
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
+def read_config_value(name: str, default: str = "") -> str:
+    value = (os.getenv(name) or "").strip().strip("\"'")
+    if value:
+        return value
+
+    file_path = os.getenv(f"{name}_FILE") or f"/mnt/secrets-store/{name}"
+    if os.path.exists(file_path):
+        return open(file_path).read().strip().strip("\"'")
+
+    return default
+
+
+DATABASE_URL = read_config_value("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
 
 @app.middleware("http")
 async def track_requests(request, call_next):

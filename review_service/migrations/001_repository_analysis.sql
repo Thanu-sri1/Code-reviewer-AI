@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS repository_metrics (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE reviews
+ADD COLUMN IF NOT EXISTS fixed_code_language TEXT NOT NULL DEFAULT 'python';
+
 CREATE TABLE IF NOT EXISTS memory_analysis (
     repository_id TEXT PRIMARY KEY REFERENCES reviews(id) ON DELETE CASCADE,
     score NUMERIC NOT NULL DEFAULT 0,
