@@ -2,13 +2,15 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: coderaptor-config
-  namespace: coderaptor
+  namespace: codereviewer
 data:
-  LOG_LEVEL: INFO
-  POSTGRES_DB: coderaptor
-  POSTGRES_USER: coderaptor
-  AUTH_SERVICE_URL: http://auth-service:8001
-  EXECUTION_SERVICE_URL: http://execution-service:8002
-  AI_SERVICE_URL: http://ai-service:8003
-  REVIEW_SERVICE_URL: http://review-service:8004
-  EXECUTION_TIMEOUT_SECONDS: "30"
+  AZURE_OPENAI_ENDPOINT: "https://your-resource-name.openai.azure.com/"
+  AZURE_OPENAI_DEPLOYMENT: "gpt-4.1-mini"
+  AZURE_OPENAI_API_VERSION: "2025-01-01-preview"
+
+  DATABASE_URL: "postgresql://postgress:Azureuser@123@thanu-database.postgres.database.azure.com:5432/postgres?sslmode=require"
+
+  AUTH_SERVICE_URL: "http://auth-service:8001"
+  EXECUTION_SERVICE_URL: "http://execution-service:8002"
+  AI_SERVICE_URL: "http://ai-service:8003"
+  REVIEW_SERVICE_URL: "http://review-service:8004"
