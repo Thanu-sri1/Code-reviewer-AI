@@ -2,9 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: frontend
-  namespace: coderaptor
-  labels:
-    app: frontend
+  namespace: codereviewer
 spec:
   replicas: 1
   selector:
@@ -16,64 +14,26 @@ spec:
         app: frontend
     spec:
       containers:
-        - name: frontend
-          image: <ACR_LOGIN_SERVER>/frontend:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8501
-          env:
-            - name: AUTH_SERVICE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: coderaptor-config
-                  key: AUTH_SERVICE_URL
-            - name: EXECUTION_SERVICE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: coderaptor-config
-                  key: EXECUTION_SERVICE_URL
-            - name: AI_SERVICE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: coderaptor-config
-                  key: AI_SERVICE_URL
-            - name: REVIEW_SERVICE_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: coderaptor-config
-                  key: REVIEW_SERVICE_URL
-          readinessProbe:
-            httpGet:
-              path: /_stcore/health
-              port: 8501
-            initialDelaySeconds: 15
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /_stcore/health
-              port: 8501
-            initialDelaySeconds: 30
-            periodSeconds: 20
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 750m
-              memory: 768Mi
+      - name: frontend
+        image: thanusriacr.azurecr.io/frontend:v1
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: coderaptor-config
+        - secretRef:
+            name: coderaptor-secret
+        ports:
+        - containerPort: 8501
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend
-  namespace: coderaptor
-  labels:
-    app: frontend
+  name: frontend-service
+  namespace: codereviewer
 spec:
-  type: LoadBalancer
   selector:
     app: frontend
   ports:
-    - name: http
-      port: 80
-      targetPort: 8501
+  - port: 8501
+    targetPort: 8501
+  type: ClusterIP

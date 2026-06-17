@@ -4,7 +4,7 @@ metadata:
   name: coderaptor-config
   namespace: codereviewer
 data:
-  AZURE_OPENAI_ENDPOINT: "https://your-resource-name.openai.azure.com/"
+  AZURE_OPENAI_ENDPOINT: "-https://ai-codereviewer-resource.openai.azure.com/"
   AZURE_OPENAI_DEPLOYMENT: "gpt-4.1-mini"
   AZURE_OPENAI_API_VERSION: "2025-01-01-preview"
 

@@ -13,3 +13,5 @@ env/
 *.db
 auth_service/*.db
 review_service/*.db
+node_modules
+k8s/secrets.yaml
