@@ -43,8 +43,8 @@ spec:
                 configMapKeyRef:
                   name: coderaptor-config
                   key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD_FILE
-              value: /mnt/secrets-store/POSTGRES_PASSWORD
+            - name: POSTGRES_PASSWORD
+              value: coderaptor
           readinessProbe:
             exec:
               command:
@@ -71,19 +71,10 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
-            - name: secrets-store
-              mountPath: /mnt/secrets-store
-              readOnly: true
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
             claimName: postgres-data
-        - name: secrets-store
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              secretProviderClass: coderaptor-keyvault
 ---
 apiVersion: v1
 kind: Service
