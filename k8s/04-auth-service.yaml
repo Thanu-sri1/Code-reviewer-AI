@@ -22,6 +22,7 @@ spec:
             name: coderaptor-config
         - secretRef:
             name: coderaptor-secret
+            optional: true
         env:
         - name: DATABASE_URL
           valueFrom:

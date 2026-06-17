@@ -22,6 +22,7 @@ spec:
             name: coderaptor-config
         - secretRef:
             name: coderaptor-secret
+            optional: true
         ports:
         - containerPort: 8501
 ---
