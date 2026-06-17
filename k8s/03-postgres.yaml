@@ -2,7 +2,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-data
-  namespace: coderaptor
+  namespace: codereviewer
 spec:
   accessModes:
     - ReadWriteOnce
@@ -14,7 +14,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
-  namespace: coderaptor
+  namespace: codereviewer
   labels:
     app: postgres
 spec:
@@ -89,7 +89,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres
-  namespace: coderaptor
+  namespace: codereviewer
   labels:
     app: postgres
 spec:

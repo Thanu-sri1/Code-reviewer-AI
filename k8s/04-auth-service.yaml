@@ -22,6 +22,12 @@ spec:
             name: coderaptor-config
         - secretRef:
             name: coderaptor-secret
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: coderaptor-config
+              key: DATABASE_URL
         ports:
         - containerPort: 8001
 ---
