@@ -3,11 +3,12 @@ import logging
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any
 
 import psycopg2
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response
 from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel, Field
 
@@ -39,6 +40,8 @@ DATABASE_URL = read_config_value("DATABASE_URL", "postgresql://coderaptor:codera
 AI_SERVICE_URL = read_config_value("AI_SERVICE_URL", "http://ai-service:8003")
 REQUEST_COUNT = 0
 REQUEST_LATENCY_SECONDS = 0.0
+REPOSITORY_REVIEW_EXECUTOR = ThreadPoolExecutor(max_workers=int(os.getenv("REPOSITORY_REVIEW_WORKERS", "2")))
+ENQUEUED_REPOSITORY_JOBS: set[str] = set()
 REVIEW_MODES = {
     "Security Review",
     "Performance Review",
@@ -301,7 +304,7 @@ def delete_review(tab_id: str):
 
 
 @app.post("/review/repository", status_code=202)
-def start_repository_review(request: RepositoryReviewRequest, background_tasks: BackgroundTasks):
+def start_repository_review(request: RepositoryReviewRequest):
     mode = normalize_review_mode(request.mode)
     try:
         validate_github_url(request.repository_url)
@@ -319,13 +322,16 @@ def start_repository_review(request: RepositoryReviewRequest, background_tasks: 
             )
         conn.commit()
 
-    background_tasks.add_task(process_repository_review_job, job_id, request.repository_url, mode)
-    return {"job_id": job_id, "status": "queued", "progress": 0}
+    enqueue_repository_review_job(job_id, request.repository_url, mode)
+    return {"job_id": job_id, "status": "running", "progress": 5}
 
 
 @app.get("/review/status/{job_id}")
 def get_repository_review_status(job_id: str):
     job = fetch_review_job(job_id)
+    if job["status"] == "queued":
+        enqueue_repository_review_job(job["id"], job["repository_url"], job["mode"])
+        job = fetch_review_job(job_id)
     return {
         "job_id": job["id"],
         "repository_url": job["repository_url"],
@@ -341,6 +347,9 @@ def get_repository_review_status(job_id: str):
 @app.get("/review/result/{job_id}")
 def get_repository_review_result(job_id: str):
     job = fetch_review_job(job_id)
+    if job["status"] == "queued":
+        enqueue_repository_review_job(job["id"], job["repository_url"], job["mode"])
+        job = fetch_review_job(job_id)
     if job["status"] == "failed":
         raise HTTPException(status_code=500, detail=job["error"] or "Repository review failed.")
     if job["status"] != "completed":
@@ -445,6 +454,14 @@ def update_review_job(job_id: str, status: str | None = None, progress: int | No
         conn.commit()
 
 
+def enqueue_repository_review_job(job_id: str, repository_url: str, mode: str) -> None:
+    if job_id in ENQUEUED_REPOSITORY_JOBS:
+        return
+    ENQUEUED_REPOSITORY_JOBS.add(job_id)
+    update_review_job(job_id, status="running", progress=5, error="")
+    REPOSITORY_REVIEW_EXECUTOR.submit(process_repository_review_job, job_id, repository_url, mode)
+
+
 def process_repository_review_job(job_id: str, repository_url: str, mode: str):
     logger.info(json.dumps({"event": "repository_review_started", "job_id": job_id, "repository_url": repository_url, "mode": mode}))
     try:
@@ -459,6 +476,8 @@ def process_repository_review_job(job_id: str, repository_url: str, mode: str):
     except Exception as exc:
         logger.exception(json.dumps({"event": "repository_review_failed", "job_id": job_id}))
         update_review_job(job_id, status="failed", progress=100, error=str(exc))
+    finally:
+        ENQUEUED_REPOSITORY_JOBS.discard(job_id)
 
 
 def persist_analysis(cur, repository_id: str, analysis: dict[str, Any]) -> None:

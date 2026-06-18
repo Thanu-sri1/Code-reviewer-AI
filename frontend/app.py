@@ -2,6 +2,7 @@ import ast
 import difflib
 import hashlib
 import os
+import time
 import uuid
 from datetime import datetime
 
@@ -1035,6 +1036,20 @@ def render_repository_review_panel(current_tab, current_tab_data):
     if not job_id:
         return
 
+    current_status = st.session_state["tabs"][current_tab].get("repository_review_status") or {}
+    if current_status.get("status") in {"queued", "running"}:
+        status, error = get_repository_review_status(job_id)
+        if error:
+            st.error(error)
+        elif status:
+            st.session_state["tabs"][current_tab]["repository_review_status"] = status
+            if status.get("status") == "completed":
+                result, result_error = get_repository_review_result(job_id)
+                if result_error:
+                    st.error(result_error)
+                elif result:
+                    st.session_state["tabs"][current_tab]["repository_review_result"] = result
+
     with col2:
         if st.button("Refresh Repository Status", key=f"repo_refresh_{current_tab}", use_container_width=True):
             status, error = get_repository_review_status(job_id)
@@ -1073,6 +1088,9 @@ def render_repository_review_panel(current_tab, current_tab_data):
             mime="text/markdown",
             use_container_width=True,
         )
+    elif status and status.get("status") in {"queued", "running"}:
+        time.sleep(3)
+        st.rerun()
 
 
 def show_review_page():
