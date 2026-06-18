@@ -28,22 +28,10 @@ spec:
 
         - secretRef:
             name: kv-secret
+            optional: true
 
         ports:
         - containerPort: 8001
-
-        volumeMounts:
-        - name: secrets-store-inline
-          mountPath: "/mnt/secrets-store"
-          readOnly: true
-
-      volumes:
-      - name: secrets-store-inline
-        csi:
-          driver: secrets-store.csi.k8s.io
-          readOnly: true
-          volumeAttributes:
-            secretProviderClass: "kv-secrets"
 ---
 apiVersion: v1
 kind: Service
