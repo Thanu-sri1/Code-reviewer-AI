@@ -995,9 +995,25 @@ def run_repository_review(repository_url: str, mode: str, ai_service_url: str, p
             "pipeline_files": [{"path": item["path"], "line_count": item["line_count"]} for item in scan["pipeline_files"]],
             "local_analysis": scan["local_analysis"],
             "ai_report": ai_result.get("report", ""),
+            "ai_release_readiness": parse_ai_json(ai_result.get("report", "")),
         }
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def parse_ai_json(text: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(text or "{}")
+        return payload if isinstance(payload, dict) else {}
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text or "", re.DOTALL)
+        if not match:
+            return {}
+        try:
+            payload = json.loads(match.group(0))
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            return {}
 
 
 def extract_repository_intelligence(summary: dict[str, Any]) -> dict[str, Any]:

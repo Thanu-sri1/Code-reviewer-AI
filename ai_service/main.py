@@ -470,20 +470,13 @@ Use this shape:
   }}
 }}
 
-Use the deterministic repository intelligence to make the report distinctive:
-- Reference the Production Readiness Score and weakest components.
-- Start the Prioritized Action Plan from the Release Gate blockers and warnings.
-- Include the Threat Model risks in Security Findings.
-- Explain any Prompt Injection Scan findings as AI-specific supply-chain risk.
-- Summarize the Codebase Onboarding Guide for new contributors.
-- Explain the Risk Heatmap using specific high-risk files.
-- Include the Mermaid Architecture Diagram exactly if it is provided.
-- Convert the Sprint Fix Plan into practical implementation work.
-
-Pipeline Review Report must explicitly evaluate GitHub Actions, Azure DevOps, Jenkins, and GitLab files when present. Identify hardcoded secrets, missing approvals, missing environment separation, inefficient stages, missing artifact management, missing caching, missing rollback strategy, missing test stages, missing code quality gates, and missing vulnerability scanning.
-
-Use severity labels Critical, High, Medium, Low. Include file paths for findings. If evidence is insufficient, say so and recommend what to inspect next. Do not invent files or line numbers that were not provided.
-Focus on actionable engineering decisions, not explanations.
+Rules:
+- Return only JSON. No markdown.
+- Keep every issue short and actionable.
+- Every issue must include exact_fix.
+- Add fixed_code only when a concrete YAML, Dockerfile, pipeline, or code snippet is useful.
+- Focus on release decisions, deployment failure, cost waste, production impact, and blockers.
+- Do not invent files or line numbers that were not provided.
 """
         report = azure_chat_completion(
             [

@@ -339,6 +339,7 @@ def get_repository_review_status(job_id: str):
         "status": job["status"],
         "progress": job["progress"],
         "error": job["error"],
+        "suggestions": build_error_suggestions(job["error"]) if job["error"] else [],
         "created_at": job["created_at"],
         "updated_at": job["updated_at"],
     }
@@ -351,7 +352,13 @@ def get_repository_review_result(job_id: str):
         enqueue_repository_review_job(job["id"], job["repository_url"], job["mode"])
         job = fetch_review_job(job_id)
     if job["status"] == "failed":
-        raise HTTPException(status_code=500, detail=job["error"] or "Repository review failed.")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": job["error"] or "Repository review failed.",
+                "suggestions": build_error_suggestions(job["error"] or ""),
+            },
+        )
     if job["status"] != "completed":
         raise HTTPException(status_code=202, detail={"status": job["status"], "progress": job["progress"]})
     return {
@@ -361,6 +368,52 @@ def get_repository_review_result(job_id: str):
         "status": job["status"],
         "result": job["result"],
     }
+
+
+def build_error_suggestions(error: str) -> list[str]:
+    message = (error or "").lower()
+    if not message:
+        return ["Check review-service logs and retry the repository review."]
+    if "azure openai config missing" in message:
+        return [
+            "Create a .env file in the project root.",
+            "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.",
+            "Restart Docker Compose with docker compose up --build.",
+        ]
+    if "name or service not known" in message or "unable to connect to azure openai" in message:
+        return [
+            "Check AZURE_OPENAI_ENDPOINT. It should look like https://your-resource.openai.azure.com.",
+            "Verify DNS/network access from the ai-service container.",
+            "Restart ai-service after changing .env.",
+        ]
+    if "git is not installed" in message:
+        return [
+            "Rebuild review-service so the updated Dockerfile installs git.",
+            "Run docker compose build review-service.",
+        ]
+    if "repository clone timed out" in message or "git clone failed" in message:
+        return [
+            "Check that the GitHub repository URL is public and valid.",
+            "Try a smaller repository first.",
+            "Verify the review-service container has internet access.",
+        ]
+    if "quota" in message or "rate" in message or "429" in message:
+        return [
+            "Azure OpenAI quota or rate limit was reached.",
+            "Wait a few minutes and retry.",
+            "Use a smaller repository or increase Azure quota.",
+        ]
+    if "deployment was not found" in message or "404" in message:
+        return [
+            "Check AZURE_OPENAI_DEPLOYMENT in .env.",
+            "Make sure the deployment name exactly matches Azure AI Foundry.",
+            "Confirm the deployment is in the same Azure OpenAI resource as the endpoint.",
+        ]
+    return [
+        "Open review-service logs for the full stack trace.",
+        "Check ai-service /health and /ready endpoints.",
+        "Retry with a small public GitHub repository to isolate the issue.",
+    ]
 
 
 @app.get("/api/metrics/{repository_id}")

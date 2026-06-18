@@ -599,87 +599,40 @@ def summarize_service_error(response):
         detail = response.json().get("detail", response.text)
     except ValueError:
         detail = response.text
+    if isinstance(detail, dict):
+        error = detail.get("error", "")
+        suggestions = detail.get("suggestions", [])
+        if suggestions:
+            return f"{error}\n\nSuggestions:\n" + "\n".join(f"- {item}" for item in suggestions)
     return str(detail)
+
+
+def render_error_suggestions(suggestions):
+    if not suggestions:
+        return
+    st.markdown("Suggestions")
+    for suggestion in suggestions:
+        st.write(f"- {suggestion}")
 
 
 def build_repository_report_download(result):
     if not result:
         return ""
     payload = result.get("result", result)
-    report = payload.get("ai_report", "")
-    summary = payload.get("summary", {})
     intelligence = payload.get("repository_intelligence", {})
     release_readiness = intelligence.get("release_readiness", {})
     lines = [
-        "# Repository Review Export",
+        "# AI Release Readiness Report",
         "",
         f"- Repository: `{payload.get('repository_url', '')}`",
         f"- Mode: `{payload.get('mode', '')}`",
         f"- Generated At: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`",
         "",
-        "## Repository Summary",
-        "",
-        "```json",
-        json_dumps(summary),
-        "```",
-        "",
-        "## Production Readiness",
-        "",
-        "```json",
-        json_dumps(intelligence.get("production_readiness_score", {})),
-        "```",
-        "",
-        "## AI Release Readiness Platform",
+        "## Dashboard JSON",
         "",
         "```json",
         json_dumps(release_readiness),
         "```",
-        "",
-        "## Release Gate",
-        "",
-        "```json",
-        json_dumps(intelligence.get("release_gate", {})),
-        "```",
-        "",
-        "## Threat Model",
-        "",
-        "```json",
-        json_dumps(intelligence.get("threat_model", {})),
-        "```",
-        "",
-        "## Prompt Injection Scan",
-        "",
-        "```json",
-        json_dumps(intelligence.get("prompt_injection_scan", [])),
-        "```",
-        "",
-        "## Onboarding Guide",
-        "",
-        "```json",
-        json_dumps(intelligence.get("onboarding_guide", {})),
-        "```",
-        "",
-        "## Risk Heatmap",
-        "",
-        "```json",
-        json_dumps(intelligence.get("risk_heatmap", [])),
-        "```",
-        "",
-        "## Architecture Diagram",
-        "",
-        "```mermaid",
-        intelligence.get("architecture_diagram", {}).get("diagram", "No diagram available."),
-        "```",
-        "",
-        "## Sprint Fix Plan",
-        "",
-        "```json",
-        json_dumps(intelligence.get("sprint_fix_plan", [])),
-        "```",
-        "",
-        "## AI Review Report",
-        "",
-        report or "No report available.",
     ]
     return "\n".join(lines)
 
@@ -693,14 +646,7 @@ def json_dumps(value):
 def render_repository_intelligence(payload):
     intelligence = payload.get("repository_intelligence", {})
     release_readiness = intelligence.get("release_readiness", {})
-    readiness = intelligence.get("production_readiness_score", {})
-    heatmap = intelligence.get("risk_heatmap", [])
-    architecture = intelligence.get("architecture_diagram", {})
-    sprint_plan = intelligence.get("sprint_fix_plan", [])
-    release_gate = intelligence.get("release_gate", {})
-    threat_model = intelligence.get("threat_model", {})
     prompt_injection_scan = intelligence.get("prompt_injection_scan", [])
-    onboarding_guide = intelligence.get("onboarding_guide", {})
 
     if release_readiness:
         st.markdown("#### AI Release Readiness")
@@ -742,55 +688,26 @@ def render_repository_intelligence(payload):
             )
         if release_readiness.get("fix_now"):
             st.markdown("#### Fix Now")
-            for index, item in enumerate(release_readiness["fix_now"][:6], start=1):
-                st.markdown(f"**{index}. {item.get('issue', 'Issue')}**")
-                st.caption(f"{item.get('file', '')} | {item.get('risk_level', '')} | {item.get('impact', '')}")
-                st.write(item.get("exact_fix", ""))
+            st.table(
+                [
+                    {
+                        "File": item.get("file"),
+                        "Issue": item.get("issue"),
+                        "Risk": item.get("risk_level"),
+                        "Impact": item.get("impact"),
+                        "Suggestion": item.get("exact_fix"),
+                    }
+                    for item in release_readiness["fix_now"][:8]
+                ]
+            )
+            for index, item in enumerate(release_readiness["fix_now"][:5], start=1):
                 if item.get("fixed_code"):
-                    st.code(item["fixed_code"], language="yaml")
-
-    if release_gate:
-        st.markdown("#### Release Gate")
-        decision = release_gate.get("decision", "UNKNOWN")
-        if decision == "BLOCKED":
-            st.error(f"Release Decision: {decision}")
-        elif decision == "APPROVED_WITH_WARNINGS":
-            st.warning(f"Release Decision: {decision}")
-        else:
-            st.success(f"Release Decision: {decision}")
-        if release_gate.get("blockers"):
-            st.table([{"Blocker": item} for item in release_gate["blockers"]])
-        if release_gate.get("warnings"):
-            st.table([{"Warning": item} for item in release_gate["warnings"]])
-        st.caption(release_gate.get("next_action", ""))
-
-    if readiness:
-        st.markdown("#### Production Readiness")
-        cols = st.columns(4)
-        cols[0].metric("Overall", readiness.get("overall", "N/A"))
-        cols[1].metric("Rating", readiness.get("rating", "N/A"))
-        components = readiness.get("components", {})
-        cols[2].metric("Security", components.get("security", "N/A"))
-        cols[3].metric("DevOps", components.get("devops", "N/A"))
-        if components:
-            st.table([{"Area": key.replace("_", " ").title(), "Score": value} for key, value in components.items()])
-
-    if heatmap:
-        st.markdown("#### Risk Heatmap")
-        st.table(
-            [
-                {
-                    "Severity": item.get("severity"),
-                    "Score": item.get("score"),
-                    "File": item.get("path"),
-                    "Why": ", ".join(item.get("reasons", [])),
-                }
-                for item in heatmap[:12]
-            ]
-        )
+                    with st.expander(f"Fix {index}: {item.get('issue', 'Issue')}"):
+                        st.caption(item.get("file", ""))
+                        st.code(item["fixed_code"], language="yaml")
 
     if prompt_injection_scan:
-        st.markdown("#### Prompt Injection Scan")
+        st.markdown("#### AI Safety Warnings")
         st.table(
             [
                 {
@@ -803,43 +720,8 @@ def render_repository_intelligence(payload):
             ]
         )
 
-    if threat_model:
-        st.markdown("#### Threat Model")
-        model_tabs = st.tabs(["Assets", "Entry Points", "Trust Boundaries", "STRIDE"])
-        with model_tabs[0]:
-            st.table([{"Asset": item} for item in threat_model.get("assets", [])])
-        with model_tabs[1]:
-            st.table([{"Entry Point": item} for item in threat_model.get("entry_points", [])])
-        with model_tabs[2]:
-            st.table([{"Trust Boundary": item} for item in threat_model.get("trust_boundaries", [])])
-        with model_tabs[3]:
-            st.table(threat_model.get("stride", []))
-
-    if architecture.get("diagram"):
-        st.markdown("#### Architecture Diagram")
-        st.code(architecture["diagram"], language="mermaid")
-
-    if sprint_plan:
-        st.markdown("#### Sprint Fix Plan")
-        for sprint in sprint_plan:
-            st.markdown(f"**{sprint.get('name', 'Sprint')}**")
-            st.caption(sprint.get("goal", ""))
-            st.table([{"Task": task} for task in sprint.get("tasks", [])])
-
-    if onboarding_guide:
-        st.markdown("#### Codebase Onboarding Guide")
-        st.write(f"Repo type: {onboarding_guide.get('repo_type', 'Unknown')}")
-        st.write("Frameworks to learn")
-        st.table([{"Framework": item} for item in onboarding_guide.get("frameworks_to_learn", [])])
-        guide_tabs = st.tabs(["Important Files", "Local Setup", "First Day Tasks", "Questions"])
-        with guide_tabs[0]:
-            st.table([{"File": item} for item in onboarding_guide.get("important_files", [])])
-        with guide_tabs[1]:
-            st.table([{"Hint": item} for item in onboarding_guide.get("local_setup_hints", [])])
-        with guide_tabs[2]:
-            st.table([{"Task": item} for item in onboarding_guide.get("first_day_tasks", [])])
-        with guide_tabs[3]:
-            st.table([{"Question": item} for item in onboarding_guide.get("questions_new_developer_should_ask", [])])
+    with st.expander("Advanced details"):
+        st.json(intelligence)
 
 
 def get_sorted_tabs():
@@ -1280,6 +1162,7 @@ def render_repository_review_panel(current_tab, current_tab_data):
         st.caption(f"Job {job_id}: {status.get('status', 'unknown')} ({progress}%)")
         if status.get("error"):
             st.error(status["error"])
+            render_error_suggestions(status.get("suggestions", []))
 
     result = st.session_state["tabs"][current_tab].get("repository_review_result")
     if result:
