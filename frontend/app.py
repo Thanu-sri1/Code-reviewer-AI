@@ -548,6 +548,31 @@ def review_code(code, tab_id, mode="Full Repository Review"):
         st.error(f"Error during code review: {str(e)}")
 
 
+def generate_corrected_file(code, mode="Full Repository Review"):
+    try:
+        response = requests.post(
+            f"{AI_SERVICE_URL}/review",
+            json={"code": code, "mode": mode},
+            timeout=120,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            fixed_code = data.get("fixed_code", "")
+            fixed_language = normalize_code_language(data.get("fixed_code_language", "text"))
+            if fixed_code:
+                return {
+                    "fixed_code": fixed_code,
+                    "fixed_code_language": fixed_language,
+                    "review_output": data.get("review_output", ""),
+                }, None
+            return None, "AI reviewed the file but did not return corrected code."
+        return None, summarize_ai_error(response)
+    except requests.ConnectionError:
+        return None, "AI Service is unreachable."
+    except Exception as exc:
+        return None, str(exc)
+
+
 def start_repository_review(repository_url, mode):
     try:
         response = requests.post(
@@ -817,6 +842,40 @@ def render_repository_file_viewer(payload):
                         st.code(item["fixed_code"], language=language_for_code_block(selected_file.get("language")))
         else:
             st.success("No direct issues were mapped to this file.")
+
+        fix_key = f"repo_file_fix_{payload.get('repository_url', '')}_{selected_path}"
+        if st.button("Generate Corrected File", key=f"generate_fix_{fix_key}", type="primary"):
+            with st.spinner("Generating corrected syntax and fixes..."):
+                fix_result, fix_error = generate_corrected_file(
+                    selected_file.get("content", ""),
+                    payload.get("mode", "Full Repository Review"),
+                )
+            if fix_error:
+                st.error(fix_error)
+            else:
+                st.session_state[fix_key] = fix_result
+                st.success("Corrected file generated.")
+
+        if st.session_state.get(fix_key):
+            fix_result = st.session_state[fix_key]
+            fixed_code = fix_result.get("fixed_code", "")
+            fixed_language = fix_result.get("fixed_code_language", language_for_code_block(selected_file.get("language")))
+            st.markdown("#### Corrected Version")
+            before_tab, after_tab, notes_tab = st.tabs(["Current", "Corrected", "What Changed"])
+            with before_tab:
+                st.code(selected_file.get("content", ""), language=language_for_code_block(selected_file.get("language")))
+            with after_tab:
+                st.code(fixed_code, language=fixed_language)
+                st.download_button(
+                    "Download Corrected File",
+                    data=fixed_code,
+                    file_name=selected_path.split("/")[-1],
+                    mime="text/plain",
+                    key=f"download_fix_{fix_key}",
+                    use_container_width=True,
+                )
+            with notes_tab:
+                st.markdown(fix_result.get("review_output", "No explanation available."))
 
     with code_tab:
         if selected_file.get("truncated"):
