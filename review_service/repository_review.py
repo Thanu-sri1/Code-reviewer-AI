@@ -152,6 +152,9 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
     languages = Counter(item["language"] for item in files)
     dependency_files = find_dependency_files(root)
     frameworks = detect_frameworks(files, dependency_files)
+    risk_heatmap = build_risk_heatmap(files)
+    production_readiness = calculate_production_readiness(files, dependency_files, risk_heatmap)
+    sprint_plan = build_sprint_fix_plan(files, dependency_files, risk_heatmap, production_readiness)
     return {
         "project_overview": {
             "reviewed_files": len(files),
@@ -165,6 +168,10 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
         "dependency_analysis": dependency_files,
         "risk_assessment": build_risk_assessment(files, dependency_files),
         "technical_debt_summary": build_technical_debt_summary(files),
+        "production_readiness_score": production_readiness,
+        "risk_heatmap": risk_heatmap,
+        "architecture_diagram": build_architecture_diagram(files, frameworks),
+        "sprint_fix_plan": sprint_plan,
     }
 
 
@@ -246,6 +253,191 @@ def build_technical_debt_summary(files: list[dict[str, Any]]) -> list[str]:
     return debt or ["No obvious repository-level technical debt detected from file sizes."]
 
 
+def build_risk_heatmap(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    heatmap = []
+    secret_pattern = re.compile(r"(password|secret|token|api[_-]?key|connectionstring)\s*[:=]\s*['\"]?[^'\"\s]{8,}", re.I)
+    risky_code_pattern = re.compile(r"\b(eval|exec|pickle\.loads|os\.system|subprocess\.Popen|shell=True)\b")
+    for item in files:
+        score = 0
+        reasons = []
+        path = item["path"].lower()
+        content = item["content"]
+        if secret_pattern.search(content):
+            score += 35
+            reasons.append("possible hardcoded secret")
+        if risky_code_pattern.search(content):
+            score += 20
+            reasons.append("risky runtime execution pattern")
+        if item["is_pipeline"]:
+            missing = pipeline_missing_controls(content)
+            if missing:
+                score += min(30, len(missing) * 6)
+                reasons.append(f"pipeline controls missing: {', '.join(missing[:4])}")
+        if path.endswith((".yaml", ".yml")) and "kind: deployment" in content.lower():
+            if "readinessprobe" not in content.lower():
+                score += 10
+                reasons.append("missing Kubernetes readiness probe")
+            if "resources:" not in content.lower():
+                score += 10
+                reasons.append("missing Kubernetes resource limits/requests")
+        if item["line_count"] > 500:
+            score += 12
+            reasons.append("large file")
+        if "test" not in path and item["language"] in {"Python", "JavaScript", "TypeScript", "Java"}:
+            score += 5
+            reasons.append("source file may need matching tests")
+        if score:
+            heatmap.append(
+                {
+                    "path": item["path"],
+                    "score": min(score, 100),
+                    "severity": severity_from_score(score),
+                    "reasons": reasons,
+                }
+            )
+    return sorted(heatmap, key=lambda row: row["score"], reverse=True)[:25]
+
+
+def pipeline_missing_controls(content: str) -> list[str]:
+    lowered = content.lower()
+    checks = {
+        "test stage": ("test" in lowered or "pytest" in lowered or "npm test" in lowered or "mvn test" in lowered),
+        "quality gate": ("sonar" in lowered or "lint" in lowered or "quality" in lowered),
+        "vulnerability scan": ("trivy" in lowered or "snyk" in lowered or "grype" in lowered or "dependency-check" in lowered),
+        "artifact management": ("artifact" in lowered or "upload-artifact" in lowered or "publish" in lowered),
+        "cache": ("cache" in lowered or "actions/cache" in lowered),
+        "rollback": ("rollback" in lowered),
+        "approval/environment gate": ("environment:" in lowered or "approval" in lowered or "manualvalidation" in lowered),
+    }
+    return [name for name, present in checks.items() if not present]
+
+
+def severity_from_score(score: int) -> str:
+    if score >= 70:
+        return "Critical"
+    if score >= 45:
+        return "High"
+    if score >= 25:
+        return "Medium"
+    return "Low"
+
+
+def calculate_production_readiness(
+    files: list[dict[str, Any]],
+    dependency_files: list[dict[str, Any]],
+    risk_heatmap: list[dict[str, Any]],
+) -> dict[str, Any]:
+    has_tests = any("test" in item["path"].lower() for item in files)
+    has_pipeline = any(item["is_pipeline"] for item in files)
+    has_k8s = any("apiversion:" in item["content"].lower() and "kind:" in item["content"].lower() for item in files)
+    has_docker = any(item["path"].endswith("Dockerfile") or item["path"].endswith("docker-compose.yml") for item in files)
+    has_dependency_manifest = bool(dependency_files)
+    has_lock_file = any("lock" in item["path"].lower() for item in dependency_files)
+    critical_or_high = sum(1 for item in risk_heatmap if item["severity"] in {"Critical", "High"})
+    pipeline_files = [item for item in files if item["is_pipeline"]]
+    missing_pipeline_controls = sorted({control for item in pipeline_files for control in pipeline_missing_controls(item["content"])})
+
+    components = {
+        "security": max(0, 100 - critical_or_high * 15 - sum(1 for item in risk_heatmap if item["severity"] == "Medium") * 5),
+        "testing": 80 if has_tests else 35,
+        "devops": max(20, 85 - len(missing_pipeline_controls) * 8) if has_pipeline else 25,
+        "maintainability": max(30, 90 - sum(1 for item in files if item["line_count"] > 500) * 10),
+        "deployment": 85 if has_k8s and has_docker else 60 if has_docker or has_k8s else 35,
+        "dependency_hygiene": 80 if has_dependency_manifest and has_lock_file else 55 if has_dependency_manifest else 35,
+    }
+    overall = round(sum(components.values()) / len(components), 2)
+    if overall >= 85:
+        rating = "Production Ready"
+    elif overall >= 70:
+        rating = "Mostly Ready"
+    elif overall >= 50:
+        rating = "Needs Hardening"
+    else:
+        rating = "Not Production Ready"
+    return {
+        "overall": overall,
+        "rating": rating,
+        "components": components,
+        "missing_pipeline_controls": missing_pipeline_controls,
+    }
+
+
+def build_architecture_diagram(files: list[dict[str, Any]], frameworks: list[str]) -> dict[str, Any]:
+    folders = sorted({item["path"].split("/", 1)[0] for item in files if "/" in item["path"]})
+    service_folders = [folder for folder in folders if folder.endswith("_service") or folder.endswith("-service")]
+    nodes = service_folders or folders[:8]
+    lines = ["flowchart LR"]
+    if not nodes:
+        lines.append('    repo["Repository"]')
+    else:
+        for node in nodes:
+            label = node.replace("_", " ").replace("-", " ").title()
+            lines.append(f'    {mermaid_id(node)}["{label}"]')
+        if "frontend" in nodes:
+            for node in nodes:
+                if node != "frontend":
+                    lines.append(f"    frontend --> {mermaid_id(node)}")
+        if "review_service" in nodes and "ai_service" in nodes:
+            lines.append("    review_service --> ai_service")
+    if any("Azure" in name for name in frameworks) or any("openai" in item["content"].lower() for item in files):
+        lines.append('    ai_service --> azure_openai["Azure OpenAI"]')
+    if any("DATABASE_URL" in item["content"] or "postgres" in item["content"].lower() for item in files):
+        lines.append('    auth_service --> postgres["PostgreSQL"]')
+        lines.append('    review_service --> postgres')
+    return {
+        "format": "mermaid",
+        "diagram": "\n".join(dict.fromkeys(lines)),
+        "detected_nodes": nodes,
+    }
+
+
+def mermaid_id(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "_", value)
+
+
+def build_sprint_fix_plan(
+    files: list[dict[str, Any]],
+    dependency_files: list[dict[str, Any]],
+    risk_heatmap: list[dict[str, Any]],
+    production_readiness: dict[str, Any],
+) -> list[dict[str, Any]]:
+    critical_high = [item for item in risk_heatmap if item["severity"] in {"Critical", "High"}]
+    medium = [item for item in risk_heatmap if item["severity"] == "Medium"]
+    has_tests = any("test" in item["path"].lower() for item in files)
+    has_pipeline = any(item["is_pipeline"] for item in files)
+    sprints = [
+        {
+            "name": "Sprint 1 - Blocker Hardening",
+            "goal": "Remove release blockers and obvious security exposure.",
+            "tasks": [f"Fix {item['severity']} risk in {item['path']}: {', '.join(item['reasons'][:2])}" for item in critical_high[:5]],
+        },
+        {
+            "name": "Sprint 2 - Quality Gates",
+            "goal": "Make every change measurable before merge.",
+            "tasks": [],
+        },
+        {
+            "name": "Sprint 3 - Production Operations",
+            "goal": "Improve deployability, rollback confidence, and maintainability.",
+            "tasks": [f"Reduce medium risk in {item['path']}: {', '.join(item['reasons'][:2])}" for item in medium[:5]],
+        },
+    ]
+    if not has_tests:
+        sprints[1]["tasks"].append("Add unit/integration tests for the main source folders and repository review workflow.")
+    if not has_pipeline:
+        sprints[1]["tasks"].append("Add a CI pipeline with tests, linting, artifact publishing, and vulnerability scanning.")
+    for control in production_readiness.get("missing_pipeline_controls", [])[:6]:
+        sprints[1]["tasks"].append(f"Add CI/CD control: {control}.")
+    if dependency_files and not any("lock" in item["path"].lower() for item in dependency_files):
+        sprints[2]["tasks"].append("Commit dependency lock files or document deterministic dependency resolution.")
+    if production_readiness["overall"] < 70:
+        sprints[2]["tasks"].append("Raise production readiness score above 70 by addressing weakest score components.")
+    for sprint in sprints:
+        if not sprint["tasks"]:
+            sprint["tasks"].append("No urgent task detected for this sprint from static repository intelligence.")
+    return sprints
+
+
 def aggregate_local_analysis(files: list[dict[str, Any]]) -> dict[str, Any]:
     python_files = [item for item in files if item["path"].endswith(".py")]
     analyses = [analyze_code(item["content"], filename=item["path"]) for item in python_files[:60]]
@@ -278,6 +470,7 @@ def build_ai_payload(scan: dict[str, Any], repository_url: str, mode: str) -> di
         "repository_url": repository_url,
         "mode": mode,
         "summary": scan["summary"],
+        "repository_intelligence": extract_repository_intelligence(scan["summary"]),
         "local_analysis": scan["local_analysis"],
         "files": selected,
     }
@@ -320,9 +513,19 @@ def run_repository_review(repository_url: str, mode: str, ai_service_url: str, p
             "repository_url": repository_url,
             "mode": mode,
             "summary": scan["summary"],
+            "repository_intelligence": extract_repository_intelligence(scan["summary"]),
             "pipeline_files": [{"path": item["path"], "line_count": item["line_count"]} for item in scan["pipeline_files"]],
             "local_analysis": scan["local_analysis"],
             "ai_report": ai_result.get("report", ""),
         }
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def extract_repository_intelligence(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "production_readiness_score": summary.get("production_readiness_score", {}),
+        "risk_heatmap": summary.get("risk_heatmap", []),
+        "architecture_diagram": summary.get("architecture_diagram", {}),
+        "sprint_fix_plan": summary.get("sprint_fix_plan", []),
+    }

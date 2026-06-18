@@ -134,6 +134,7 @@ class RepositoryReviewRequest(BaseModel):
     repository_url: str
     mode: str = "Full Repository Review"
     summary: dict[str, Any] = Field(default_factory=dict)
+    repository_intelligence: dict[str, Any] = Field(default_factory=dict)
     local_analysis: dict[str, Any] = Field(default_factory=dict)
     files: list[RepositoryFile] = Field(default_factory=list)
 
@@ -428,6 +429,9 @@ Mode focus: {focus}
 Repository metadata:
 {json.dumps(request.summary, indent=2)}
 
+Deterministic repository intelligence:
+{json.dumps(request.repository_intelligence, indent=2)}
+
 Local static analysis:
 {json.dumps(request.local_analysis, indent=2)}
 
@@ -451,6 +455,12 @@ Return a production-ready Markdown report with exactly these top-level sections:
 13. Technical Debt Summary
 14. Maintainability Score
 15. Prioritized Action Plan
+
+Use the deterministic repository intelligence to make the report distinctive:
+- Reference the Production Readiness Score and weakest components.
+- Explain the Risk Heatmap using specific high-risk files.
+- Include the Mermaid Architecture Diagram exactly if it is provided.
+- Convert the Sprint Fix Plan into practical implementation work.
 
 Pipeline Review Report must explicitly evaluate GitHub Actions, Azure DevOps, Jenkins, and GitLab files when present. Identify hardcoded secrets, missing approvals, missing environment separation, inefficient stages, missing artifact management, missing caching, missing rollback strategy, missing test stages, missing code quality gates, and missing vulnerability scanning.
 

@@ -608,6 +608,7 @@ def build_repository_report_download(result):
     payload = result.get("result", result)
     report = payload.get("ai_report", "")
     summary = payload.get("summary", {})
+    intelligence = payload.get("repository_intelligence", {})
     lines = [
         "# Repository Review Export",
         "",
@@ -621,6 +622,30 @@ def build_repository_report_download(result):
         json_dumps(summary),
         "```",
         "",
+        "## Production Readiness",
+        "",
+        "```json",
+        json_dumps(intelligence.get("production_readiness_score", {})),
+        "```",
+        "",
+        "## Risk Heatmap",
+        "",
+        "```json",
+        json_dumps(intelligence.get("risk_heatmap", [])),
+        "```",
+        "",
+        "## Architecture Diagram",
+        "",
+        "```mermaid",
+        intelligence.get("architecture_diagram", {}).get("diagram", "No diagram available."),
+        "```",
+        "",
+        "## Sprint Fix Plan",
+        "",
+        "```json",
+        json_dumps(intelligence.get("sprint_fix_plan", [])),
+        "```",
+        "",
         "## AI Review Report",
         "",
         report or "No report available.",
@@ -632,6 +657,50 @@ def json_dumps(value):
     import json
 
     return json.dumps(value, indent=2)
+
+
+def render_repository_intelligence(payload):
+    intelligence = payload.get("repository_intelligence", {})
+    readiness = intelligence.get("production_readiness_score", {})
+    heatmap = intelligence.get("risk_heatmap", [])
+    architecture = intelligence.get("architecture_diagram", {})
+    sprint_plan = intelligence.get("sprint_fix_plan", [])
+
+    if readiness:
+        st.markdown("#### Production Readiness")
+        cols = st.columns(4)
+        cols[0].metric("Overall", readiness.get("overall", "N/A"))
+        cols[1].metric("Rating", readiness.get("rating", "N/A"))
+        components = readiness.get("components", {})
+        cols[2].metric("Security", components.get("security", "N/A"))
+        cols[3].metric("DevOps", components.get("devops", "N/A"))
+        if components:
+            st.table([{"Area": key.replace("_", " ").title(), "Score": value} for key, value in components.items()])
+
+    if heatmap:
+        st.markdown("#### Risk Heatmap")
+        st.table(
+            [
+                {
+                    "Severity": item.get("severity"),
+                    "Score": item.get("score"),
+                    "File": item.get("path"),
+                    "Why": ", ".join(item.get("reasons", [])),
+                }
+                for item in heatmap[:12]
+            ]
+        )
+
+    if architecture.get("diagram"):
+        st.markdown("#### Architecture Diagram")
+        st.code(architecture["diagram"], language="mermaid")
+
+    if sprint_plan:
+        st.markdown("#### Sprint Fix Plan")
+        for sprint in sprint_plan:
+            st.markdown(f"**{sprint.get('name', 'Sprint')}**")
+            st.caption(sprint.get("goal", ""))
+            st.table([{"Task": task} for task in sprint.get("tasks", [])])
 
 
 def get_sorted_tabs():
@@ -1077,6 +1146,7 @@ def render_repository_review_panel(current_tab, current_tab_data):
     if result:
         payload = result.get("result", {})
         summary = payload.get("summary", {})
+        render_repository_intelligence(payload)
         st.markdown("#### Repository Summary")
         st.json(summary)
         st.markdown("#### Repository Review Report")
