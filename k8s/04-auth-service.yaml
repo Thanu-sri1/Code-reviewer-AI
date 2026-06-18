@@ -30,6 +30,20 @@ spec:
             name: kv-secret
             optional: true
 
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: kv-secret
+              key: DATABASE_URL
+              optional: true
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: kv-secret
+              key: JWT_SECRET
+              optional: true
+
         ports:
         - containerPort: 8001
 ---
