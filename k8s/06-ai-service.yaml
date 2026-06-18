@@ -3,28 +3,47 @@ kind: Deployment
 metadata:
   name: ai-service
   namespace: codereviewer
+
 spec:
   replicas: 1
+
   selector:
     matchLabels:
       app: ai-service
+
   template:
     metadata:
       labels:
         app: ai-service
+
     spec:
       containers:
       - name: ai-service
         image: thanusriacr.azurecr.io/ai-service:v1
         imagePullPolicy: Always
+
         envFrom:
         - configMapRef:
             name: coderaptor-config
+
         - secretRef:
-            name: coderaptor-secret
-            optional: true
+            name: kv-secret
+
         ports:
         - containerPort: 8003
+
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "kv-secrets"
 ---
 apiVersion: v1
 kind: Service

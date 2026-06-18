@@ -3,34 +3,47 @@ kind: Deployment
 metadata:
   name: auth-service
   namespace: codereviewer
+
 spec:
   replicas: 1
+
   selector:
     matchLabels:
       app: auth-service
+
   template:
     metadata:
       labels:
         app: auth-service
+
     spec:
       containers:
       - name: auth-service
         image: thanusriacr.azurecr.io/auth-service:v1
         imagePullPolicy: Always
+
         envFrom:
         - configMapRef:
             name: coderaptor-config
+
         - secretRef:
-            name: coderaptor-secret
-            optional: true
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: coderaptor-config
-              key: DATABASE_URL
+            name: kv-secret
+
         ports:
         - containerPort: 8001
+
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "kv-secrets"
 ---
 apiVersion: v1
 kind: Service
