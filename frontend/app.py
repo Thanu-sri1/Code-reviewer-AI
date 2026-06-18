@@ -714,7 +714,7 @@ def render_repository_intelligence(payload):
                 score_cols[index].metric(label, scores.get(key, "N/A"))
         if release_readiness.get("blockers"):
             st.error(f"Release Decision: {release_readiness.get('decision', 'UNKNOWN')}")
-            st.table([{"Blocker": item} for item in release_readiness["blockers"]])
+            render_release_blocker_cards(release_readiness)
         else:
             st.success(f"Release Decision: {release_readiness.get('decision', 'UNKNOWN')}")
         predictions = release_readiness.get("predictions", {})
@@ -763,6 +763,85 @@ def render_repository_intelligence(payload):
                 for item in prompt_injection_scan
             ]
         )
+
+
+def render_release_blocker_cards(release_readiness):
+    fixes = release_readiness.get("fix_now", [])
+    for index, blocker in enumerate(release_readiness.get("blockers", [])[:6], start=1):
+        fix = find_matching_fix(blocker, fixes)
+        issue = fix.get("issue") or blocker
+        impact = fix.get("impact") or blocker_impact(issue)
+        exact_fix = fix.get("exact_fix") or blocker_fix(issue)
+        effort = estimate_fix_effort(issue)
+
+        st.markdown(f"**Blocker {index}: {issue}**")
+        st.write(f"**Why?** {issue}.")
+        st.write(f"**What happens if ignored?** {impact}")
+        st.write(f"**How to fix?** {exact_fix}")
+        st.write(f"**Estimated effort:** {effort}")
+
+        if fix.get("fixed_code"):
+            with st.expander("Generate Correct Fix"):
+                st.write("Copy this into the affected pipeline/config file and replace placeholders like `<deployment-name>` and `<namespace>`.")
+                st.code(fix["fixed_code"], language=language_for_code_block_from_path(fix.get("file", "")))
+        else:
+            with st.expander("Generate Correct Fix"):
+                st.write(exact_fix)
+
+
+def find_matching_fix(blocker, fixes):
+    blocker_text = (blocker or "").lower()
+    for fix in fixes:
+        issue = (fix.get("issue") or "").lower()
+        if issue and (issue in blocker_text or blocker_text in issue):
+            return fix
+    for fix in fixes:
+        issue_words = set((fix.get("issue") or "").lower().split())
+        blocker_words = set(blocker_text.split())
+        if issue_words and len(issue_words.intersection(blocker_words)) >= 2:
+            return fix
+    return {}
+
+
+def blocker_impact(issue):
+    issue_text = (issue or "").lower()
+    if "rollback" in issue_text:
+        return "Deployment failures may require manual recovery and increase downtime."
+    if "readiness" in issue_text:
+        return "Traffic may be sent to pods before the application is ready."
+    if "liveness" in issue_text:
+        return "Hung containers may stay online instead of being restarted."
+    if "resource" in issue_text:
+        return "Pods may be evicted, throttled, or reserve more cluster capacity than needed."
+    if "root" in issue_text:
+        return "Container security policies may block deployment or increase security risk."
+    return "This can create release risk or require manual production recovery."
+
+
+def blocker_fix(issue):
+    issue_text = (issue or "").lower()
+    if "rollback" in issue_text:
+        return "Add a rollback step to the pipeline, for example kubectl rollout undo for failed AKS deployments."
+    if "readiness" in issue_text:
+        return "Add readinessProbe to the Kubernetes deployment container."
+    if "liveness" in issue_text:
+        return "Add livenessProbe to restart unhealthy containers."
+    if "resource" in issue_text:
+        return "Add CPU and memory requests/limits to the Kubernetes deployment."
+    if "root" in issue_text:
+        return "Create a non-root user in Dockerfile and switch with USER."
+    return "Open the affected file and apply the suggested release-readiness fix."
+
+
+def estimate_fix_effort(issue):
+    issue_text = (issue or "").lower()
+    if any(word in issue_text for word in ["rollback", "readiness", "liveness", "healthcheck"]):
+        return "5 minutes"
+    if any(word in issue_text for word in ["resource", "artifact", "cache"]):
+        return "10 minutes"
+    if "root" in issue_text:
+        return "10 minutes"
+    return "15 minutes"
 
 
 def render_compact_repository_overview(payload):
@@ -926,6 +1005,25 @@ def language_for_code_block(language):
         "DevOps": "yaml",
     }
     return mapping.get(language or "", "text")
+
+
+def language_for_code_block_from_path(path):
+    path = (path or "").lower()
+    if path.endswith(".py"):
+        return "python"
+    if path.endswith(".js"):
+        return "javascript"
+    if path.endswith(".ts"):
+        return "typescript"
+    if path.endswith(".java"):
+        return "java"
+    if path.endswith(".json"):
+        return "json"
+    if path.endswith((".yaml", ".yml")) or "workflow" in path or "pipeline" in path or path.endswith("jenkinsfile"):
+        return "yaml"
+    if path.endswith("dockerfile"):
+        return "dockerfile"
+    return "text"
 
 
 def render_ai_enrichment_warning(payload):

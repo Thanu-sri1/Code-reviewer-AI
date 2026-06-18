@@ -737,9 +737,27 @@ def predict_deployment_failures(files: list[dict[str, Any]]) -> dict[str, Any]:
     for item in pipeline_files:
         missing = pipeline_missing_controls(item["content"])
         if "rollback" in missing:
-            issues.append(release_issue(item["path"], "Rollback stage missing", "Failed production deployments may require manual recovery.", "High", "Add rollback or deployment undo stage.", "kubectl rollout undo deployment/<name> -n <namespace>"))
+            issues.append(
+                release_issue(
+                    item["path"],
+                    "Rollback stage missing",
+                    "Failed production deployments may require manual recovery.",
+                    "High",
+                    "Add a rollback step that runs when deployment verification fails.",
+                    rollback_fix_snippet(item["path"]),
+                )
+            )
         if "artifact management" in missing:
-            issues.append(release_issue(item["path"], "Artifact publishing missing", "Deployments may not have traceable build outputs.", "Medium", "Publish build and scan artifacts.", "uses: actions/upload-artifact@v4"))
+            issues.append(
+                release_issue(
+                    item["path"],
+                    "Artifact publishing missing",
+                    "Deployments may not have traceable build outputs.",
+                    "Medium",
+                    "Publish build outputs or scan reports as pipeline artifacts.",
+                    artifact_fix_snippet(item["path"]),
+                )
+            )
     probability = min(95, 15 + sum({"Critical": 28, "High": 18, "Medium": 10, "Low": 4}[item["risk_level"]] for item in issues))
     return {
         "deployment_failure_probability": probability,
@@ -815,6 +833,96 @@ def release_issue(file_path: str, issue: str, impact: str, risk_level: str, exac
         "exact_fix": exact_fix,
         "fixed_code": fixed_code,
     }
+
+
+def rollback_fix_snippet(file_path: str) -> str:
+    path = file_path.lower()
+    if ".github/workflows/" in path:
+        return """- name: Verify AKS rollout
+  run: |
+    kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+
+- name: Rollback AKS deployment
+  if: failure()
+  run: |
+    kubectl rollout undo deployment/<deployment-name> -n <namespace>
+    kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+"""
+    if "azure-pipelines" in path:
+        return """- script: |
+    kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+  displayName: Verify AKS rollout
+
+- script: |
+    kubectl rollout undo deployment/<deployment-name> -n <namespace>
+    kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+  displayName: Rollback AKS deployment
+  condition: failed()
+"""
+    if "jenkinsfile" in path:
+        return """stage('Verify Rollout') {
+  steps {
+    sh 'kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s'
+  }
+}
+
+post {
+  failure {
+    sh 'kubectl rollout undo deployment/<deployment-name> -n <namespace>'
+    sh 'kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s'
+  }
+}
+"""
+    if ".gitlab-ci" in path:
+        return """verify_rollout:
+  stage: deploy
+  script:
+    - kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+
+rollback:
+  stage: deploy
+  when: on_failure
+  script:
+    - kubectl rollout undo deployment/<deployment-name> -n <namespace>
+    - kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+"""
+    return """kubectl rollout status deployment/<deployment-name> -n <namespace> --timeout=120s
+kubectl rollout undo deployment/<deployment-name> -n <namespace>
+"""
+
+
+def artifact_fix_snippet(file_path: str) -> str:
+    path = file_path.lower()
+    if ".github/workflows/" in path:
+        return """- name: Upload build artifact
+  uses: actions/upload-artifact@v4
+  with:
+    name: build-output
+    path: |
+      dist/
+      reports/
+"""
+    if "azure-pipelines" in path:
+        return """- publish: $(Build.ArtifactStagingDirectory)
+  artifact: build-output
+  displayName: Publish build artifact
+"""
+    if "jenkinsfile" in path:
+        return """post {
+  always {
+    archiveArtifacts artifacts: 'dist/**, reports/**', fingerprint: true
+  }
+}
+"""
+    if ".gitlab-ci" in path:
+        return """artifacts:
+  paths:
+    - dist/
+    - reports/
+  expire_in: 7 days
+"""
+    return """# Publish build outputs and scan reports as CI/CD artifacts.
+"""
 
 
 def impact_issue(file_path: str, issue: str, current: str, projected: str, risk_level: str, exact_fix: str, expected: str) -> dict[str, str]:
