@@ -17,13 +17,22 @@ EXECUTION_SERVICE_URL = os.getenv("EXECUTION_SERVICE_URL", "http://localhost:800
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8003")
 REVIEW_SERVICE_URL = os.getenv("REVIEW_SERVICE_URL", "http://localhost:8004")
 AUTH_REQUIRED_MESSAGE = "Please login or register before using code review, file upload, or code execution."
-LANGUAGE_OPTIONS = ["python", "java", "javascript", "yaml"]
+LANGUAGE_OPTIONS = ["python", "java", "javascript", "typescript", "yaml", "json"]
 LANGUAGE_LABELS = {
     "python": "Python",
     "java": "Java",
     "javascript": "JavaScript",
+    "typescript": "TypeScript",
     "yaml": "YAML",
+    "json": "JSON",
 }
+REVIEW_MODES = [
+    "Security Review",
+    "Performance Review",
+    "Best Practices Review",
+    "DevOps Review",
+    "Full Repository Review",
+]
 
 
 def inject_dashboard_styles():
@@ -113,6 +122,11 @@ def load_user_reviews(username):
                     tab_data["code_language"] = fixed_language
                 else:
                     tab_data.setdefault("code_language", "python")
+                tab_data.setdefault("repository_url", "")
+                tab_data.setdefault("repository_mode", "Full Repository Review")
+                tab_data.setdefault("repository_job_id", "")
+                tab_data.setdefault("repository_review_status", None)
+                tab_data.setdefault("repository_review_result", None)
             return tabs
         return {}
     except requests.ConnectionError:
@@ -155,6 +169,11 @@ def create_new_tab():
         "fixed_code_language": "python",
         "code_language": "python",
         "analysis": None,
+        "repository_url": "",
+        "repository_mode": "Full Repository Review",
+        "repository_job_id": "",
+        "repository_review_status": None,
+        "repository_review_result": None,
         "editor_key": 0,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -285,8 +304,10 @@ def language_from_filename(filename):
         ".py": "python",
         ".java": "java",
         ".js": "javascript",
+        ".ts": "typescript",
         ".yaml": "yaml",
         ".yml": "yaml",
+        ".json": "json",
     }
     return mapping.get(suffix, "python")
 
@@ -487,13 +508,13 @@ def build_static_review_feedback(analysis, reason):
     return "\n".join(lines)
 
 
-def review_code(code, tab_id):
+def review_code(code, tab_id, mode="Full Repository Review"):
     if not st.session_state.get("username"):
         st.warning(AUTH_REQUIRED_MESSAGE)
         return
 
     try:
-        response = requests.post(f"{AI_SERVICE_URL}/review", json={"code": code})
+        response = requests.post(f"{AI_SERVICE_URL}/review", json={"code": code, "mode": mode})
         if response.status_code == 200:
             data = response.json()
             st.session_state["tabs"][tab_id]["review_output"] = data.get("review_output", "")
@@ -524,6 +545,92 @@ def review_code(code, tab_id):
                 st.error(reason)
     except Exception as e:
         st.error(f"Error during code review: {str(e)}")
+
+
+def start_repository_review(repository_url, mode):
+    try:
+        response = requests.post(
+            f"{REVIEW_SERVICE_URL}/review/repository",
+            json={
+                "repository_url": repository_url,
+                "mode": mode,
+                "username": st.session_state.get("username") or "anonymous",
+            },
+            timeout=20,
+        )
+        if response.status_code == 202:
+            return response.json(), None
+        return None, summarize_service_error(response)
+    except requests.ConnectionError:
+        return None, "Review Service is unreachable."
+    except Exception as exc:
+        return None, str(exc)
+
+
+def get_repository_review_status(job_id):
+    try:
+        response = requests.get(f"{REVIEW_SERVICE_URL}/review/status/{job_id}", timeout=15)
+        if response.status_code == 200:
+            return response.json(), None
+        return None, summarize_service_error(response)
+    except requests.ConnectionError:
+        return None, "Review Service is unreachable."
+    except Exception as exc:
+        return None, str(exc)
+
+
+def get_repository_review_result(job_id):
+    try:
+        response = requests.get(f"{REVIEW_SERVICE_URL}/review/result/{job_id}", timeout=20)
+        if response.status_code == 200:
+            return response.json(), None
+        if response.status_code == 202:
+            return None, None
+        return None, summarize_service_error(response)
+    except requests.ConnectionError:
+        return None, "Review Service is unreachable."
+    except Exception as exc:
+        return None, str(exc)
+
+
+def summarize_service_error(response):
+    try:
+        detail = response.json().get("detail", response.text)
+    except ValueError:
+        detail = response.text
+    return str(detail)
+
+
+def build_repository_report_download(result):
+    if not result:
+        return ""
+    payload = result.get("result", result)
+    report = payload.get("ai_report", "")
+    summary = payload.get("summary", {})
+    lines = [
+        "# Repository Review Export",
+        "",
+        f"- Repository: `{payload.get('repository_url', '')}`",
+        f"- Mode: `{payload.get('mode', '')}`",
+        f"- Generated At: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`",
+        "",
+        "## Repository Summary",
+        "",
+        "```json",
+        json_dumps(summary),
+        "```",
+        "",
+        "## AI Review Report",
+        "",
+        report or "No report available.",
+    ]
+    return "\n".join(lines)
+
+
+def json_dumps(value):
+    import json
+
+    return json.dumps(value, indent=2)
 
 
 def get_sorted_tabs():
@@ -841,7 +948,7 @@ def handle_upload(uploaded_file):
     file_type = uploaded_file.type
     uploaded_language = language_from_filename(uploaded_file.name)
 
-    if uploaded_file.name.lower().endswith((".py", ".java", ".js", ".yaml", ".yml")):
+    if uploaded_file.name.lower().endswith((".py", ".java", ".js", ".ts", ".yaml", ".yml", ".json")):
         new_code = uploaded_file.read().decode("utf-8")
         code_hash = hashlib.md5(new_code.encode()).hexdigest()
 
@@ -888,6 +995,86 @@ def handle_upload(uploaded_file):
             st.warning("No code detected in the uploaded image.")
 
 
+def render_repository_review_panel(current_tab, current_tab_data):
+    st.markdown("#### Repository Review")
+    repo_url = st.text_input(
+        "GitHub Repository URL",
+        value=current_tab_data.get("repository_url", ""),
+        placeholder="https://github.com/user/project",
+        key=f"repo_url_{current_tab}",
+    )
+    mode = st.selectbox(
+        "Review mode",
+        REVIEW_MODES,
+        index=REVIEW_MODES.index(current_tab_data.get("repository_mode", "Full Repository Review"))
+        if current_tab_data.get("repository_mode", "Full Repository Review") in REVIEW_MODES
+        else REVIEW_MODES.index("Full Repository Review"),
+        key=f"repo_mode_{current_tab}",
+    )
+
+    st.session_state["tabs"][current_tab]["repository_url"] = repo_url
+    st.session_state["tabs"][current_tab]["repository_mode"] = mode
+
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("Review Repository", key=f"repo_review_{current_tab}", type="primary", use_container_width=True):
+            if not repo_url.strip():
+                st.warning("Please enter a GitHub repository URL.")
+            else:
+                data, error = start_repository_review(repo_url.strip(), mode)
+                if error:
+                    st.error(error)
+                else:
+                    st.session_state["tabs"][current_tab]["repository_job_id"] = data["job_id"]
+                    st.session_state["tabs"][current_tab]["repository_review_status"] = data
+                    st.session_state["tabs"][current_tab]["repository_review_result"] = None
+                    st.success("Repository review started.")
+                    st.rerun()
+
+    job_id = st.session_state["tabs"][current_tab].get("repository_job_id")
+    if not job_id:
+        return
+
+    with col2:
+        if st.button("Refresh Repository Status", key=f"repo_refresh_{current_tab}", use_container_width=True):
+            status, error = get_repository_review_status(job_id)
+            if error:
+                st.error(error)
+            elif status:
+                st.session_state["tabs"][current_tab]["repository_review_status"] = status
+                if status.get("status") == "completed":
+                    result, result_error = get_repository_review_result(job_id)
+                    if result_error:
+                        st.error(result_error)
+                    elif result:
+                        st.session_state["tabs"][current_tab]["repository_review_result"] = result
+                st.rerun()
+
+    status = st.session_state["tabs"][current_tab].get("repository_review_status")
+    if status:
+        progress = int(status.get("progress", 0))
+        st.progress(progress / 100)
+        st.caption(f"Job {job_id}: {status.get('status', 'unknown')} ({progress}%)")
+        if status.get("error"):
+            st.error(status["error"])
+
+    result = st.session_state["tabs"][current_tab].get("repository_review_result")
+    if result:
+        payload = result.get("result", {})
+        summary = payload.get("summary", {})
+        st.markdown("#### Repository Summary")
+        st.json(summary)
+        st.markdown("#### Repository Review Report")
+        st.markdown(payload.get("ai_report", "No repository report available."))
+        st.download_button(
+            "Download Repository Report",
+            data=build_repository_report_download(result),
+            file_name=f"repository-review-{job_id}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+
 def show_review_page():
     if not st.session_state.get("username"):
         st.warning(AUTH_REQUIRED_MESSAGE)
@@ -898,6 +1085,9 @@ def show_review_page():
     current_tab, current_tab_data = get_current_tab_data()
 
     st.title("Code Review")
+
+    render_repository_review_panel(current_tab, current_tab_data)
+    st.divider()
 
     current_language = normalize_code_language(current_tab_data.get("code_language", "python"))
     if current_language not in LANGUAGE_OPTIONS:
@@ -924,7 +1114,10 @@ def show_review_page():
         key=f"editor_{current_tab}_{current_tab_data['editor_key']}",
     )
 
-    uploaded_file = st.file_uploader("Upload a file (Code or Image)", type=["py", "java", "js", "yaml", "yml", "png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader(
+        "Upload a file (Code or Image)",
+        type=["py", "java", "js", "ts", "yaml", "yml", "json", "png", "jpg", "jpeg"],
+    )
     st.caption("For images, wait while the app extracts code. To edit manually after upload, clear the uploaded file.")
 
     if uploaded_file is not None:
@@ -957,7 +1150,7 @@ def show_review_page():
             if not st.session_state.get("username"):
                 st.warning(AUTH_REQUIRED_MESSAGE)
             elif code.strip():
-                review_code(code, current_tab)
+                review_code(code, current_tab, st.session_state["tabs"][current_tab].get("repository_mode", "Full Repository Review"))
             else:
                 st.warning("Please enter some code.")
 

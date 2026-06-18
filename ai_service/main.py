@@ -8,9 +8,10 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 logging.basicConfig(
@@ -118,12 +119,33 @@ If the image does not contain code, return: No code detected in the image.
 
 class ReviewRequest(BaseModel):
     code: str
+    mode: str = "Full Repository Review"
+
+
+class RepositoryFile(BaseModel):
+    path: str
+    language: str
+    line_count: int = 0
+    is_pipeline: bool = False
+    content: str
+
+
+class RepositoryReviewRequest(BaseModel):
+    repository_url: str
+    mode: str = "Full Repository Review"
+    summary: dict[str, Any] = Field(default_factory=dict)
+    local_analysis: dict[str, Any] = Field(default_factory=dict)
+    files: list[RepositoryFile] = Field(default_factory=list)
 
 
 class ReviewResponse(BaseModel):
     review_output: str
     fixed_code: str
     fixed_code_language: str = "text"
+
+
+class RepositoryReviewResponse(BaseModel):
+    report: str
 
 
 class AzureAIError(Exception):
@@ -302,7 +324,11 @@ def friendly_ai_error(exc: Exception) -> tuple[int, str]:
 def review_code(request: ReviewRequest):
     started = time.perf_counter()
     try:
+        focus = repository_mode_focus(request.mode)
         prompt = f"""Review this code in simple words and provide a minimal fix.
+
+Review mode: {request.mode}
+Mode focus: {focus}
 
 Include these sections:
 - Problems Found
@@ -353,6 +379,106 @@ Code:
         logger.exception(
             json.dumps({"event": "review_failed", "duration_ms": round((time.perf_counter() - started) * 1000, 2)})
         )
+        status_code, detail = friendly_ai_error(exc)
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
+def repository_mode_focus(mode: str) -> str:
+    normalized = (mode or "").strip().lower()
+    mapping = {
+        "security review": "Prioritize exploitable vulnerabilities, secret handling, authentication, authorization, dependency risk, and CI/CD supply-chain security.",
+        "performance review": "Prioritize slow code paths, inefficient algorithms, excessive I/O, build time, caching, concurrency, and scalability risks.",
+        "best practices review": "Prioritize maintainability, readability, error handling, testing, dependency hygiene, architecture boundaries, and framework conventions.",
+        "devops review": "Prioritize pipeline safety, approvals, environment separation, artifact management, caching, rollback, tests, quality gates, and vulnerability scanning.",
+        "full repository review": "Review security, performance, best practices, DevOps, maintainability, architecture, dependencies, and technical debt.",
+    }
+    return mapping.get(normalized, mapping["full repository review"])
+
+
+def format_repository_files(files: list[RepositoryFile]) -> str:
+    sections = []
+    for file_item in files:
+        sections.append(
+            "\n".join(
+                [
+                    f"### File: {file_item.path}",
+                    f"Language: {file_item.language}",
+                    f"Lines: {file_item.line_count}",
+                    f"Pipeline file: {file_item.is_pipeline}",
+                    "```",
+                    file_item.content,
+                    "```",
+                ]
+            )
+        )
+    return "\n\n".join(sections)
+
+
+@app.post("/review/repository", response_model=RepositoryReviewResponse)
+def review_repository(request: RepositoryReviewRequest):
+    started = time.perf_counter()
+    try:
+        focus = repository_mode_focus(request.mode)
+        prompt = f"""Review this GitHub repository using the selected mode.
+
+Repository URL: {request.repository_url}
+Review mode: {request.mode}
+Mode focus: {focus}
+
+Repository metadata:
+{json.dumps(request.summary, indent=2)}
+
+Local static analysis:
+{json.dumps(request.local_analysis, indent=2)}
+
+Files selected for review:
+{format_repository_files(request.files)}
+
+Return a production-ready Markdown report with exactly these top-level sections:
+
+1. Project Overview
+2. Languages Used
+3. Frameworks Detected
+4. Architecture Summary
+5. Folder Structure Analysis
+6. Dependency Analysis
+7. Code Quality Report
+8. Security Findings
+9. Performance Issues
+10. Best Practice Violations
+11. Pipeline Review Report
+12. Risk Assessment
+13. Technical Debt Summary
+14. Maintainability Score
+15. Prioritized Action Plan
+
+Pipeline Review Report must explicitly evaluate GitHub Actions, Azure DevOps, Jenkins, and GitLab files when present. Identify hardcoded secrets, missing approvals, missing environment separation, inefficient stages, missing artifact management, missing caching, missing rollback strategy, missing test stages, missing code quality gates, and missing vulnerability scanning.
+
+Use severity labels Critical, High, Medium, Low. Include file paths for findings. If evidence is insufficient, say so and recommend what to inspect next. Do not invent files or line numbers that were not provided.
+"""
+        report = azure_chat_completion(
+            [
+                {"role": "system", "content": "You are a senior software architect, security reviewer, and DevOps reviewer."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=4000,
+            temperature=0.2,
+        )
+        logger.info(
+            json.dumps(
+                {
+                    "event": "repository_review_completed",
+                    "provider": "azure-openai",
+                    "deployment": AZURE_OPENAI_DEPLOYMENT,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                    "file_count": len(request.files),
+                    "mode": request.mode,
+                }
+            )
+        )
+        return {"report": report}
+    except Exception as exc:
+        logger.exception(json.dumps({"event": "repository_review_failed"}))
         status_code, detail = friendly_ai_error(exc)
         raise HTTPException(status_code=status_code, detail=detail)
 

@@ -68,6 +68,7 @@ services:
       - "8004:8004"
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-coderaptor}:${POSTGRES_PASSWORD:-coderaptor}@postgres:5432/${POSTGRES_DB:-coderaptor}
+      - AI_SERVICE_URL=http://ai-service:8003
     volumes:
       - ./review_service:/app
 

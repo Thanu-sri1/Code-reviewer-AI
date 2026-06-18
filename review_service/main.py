@@ -2,15 +2,17 @@ import json
 import logging
 import os
 import time
+import uuid
 from datetime import datetime
 from typing import Any
 
 import psycopg2
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from psycopg2.extras import Json, RealDictCursor
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from analyzers import analyze_code
+from repository_review import RepositoryReviewError, run_repository_review, validate_github_url
 
 
 logging.basicConfig(
@@ -34,8 +36,16 @@ def read_config_value(name: str, default: str = "") -> str:
 
 
 DATABASE_URL = read_config_value("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
+AI_SERVICE_URL = read_config_value("AI_SERVICE_URL", "http://ai-service:8003")
 REQUEST_COUNT = 0
 REQUEST_LATENCY_SECONDS = 0.0
+REVIEW_MODES = {
+    "Security Review",
+    "Performance Review",
+    "Best Practices Review",
+    "DevOps Review",
+    "Full Repository Review",
+}
 
 
 @app.middleware("http")
@@ -165,6 +175,19 @@ def init_db():
                     priority TEXT NOT NULL DEFAULT 'medium',
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
             )
+            cur.execute(
+                """CREATE TABLE IF NOT EXISTS repository_review_jobs
+                   (id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    repository_url TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    result JSONB,
+                    error TEXT,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+            )
         conn.commit()
 
 
@@ -188,6 +211,12 @@ class ReviewData(BaseModel):
     fixed_code: str
     fixed_code_language: str = "python"
     timestamp: str
+
+
+class RepositoryReviewRequest(BaseModel):
+    repository_url: str = Field(..., min_length=10)
+    username: str = Field("anonymous", min_length=1)
+    mode: str = "Full Repository Review"
 
 
 @app.get("/reviews/{username}")
@@ -271,6 +300,60 @@ def delete_review(tab_id: str):
     return {"message": "Review deleted"}
 
 
+@app.post("/review/repository", status_code=202)
+def start_repository_review(request: RepositoryReviewRequest, background_tasks: BackgroundTasks):
+    mode = normalize_review_mode(request.mode)
+    try:
+        validate_github_url(request.repository_url)
+    except RepositoryReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    job_id = str(uuid.uuid4())
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO repository_review_jobs
+                   (id, username, repository_url, mode, status, progress)
+                   VALUES (%s, %s, %s, %s, %s, %s)""",
+                (job_id, request.username, request.repository_url, mode, "queued", 0),
+            )
+        conn.commit()
+
+    background_tasks.add_task(process_repository_review_job, job_id, request.repository_url, mode)
+    return {"job_id": job_id, "status": "queued", "progress": 0}
+
+
+@app.get("/review/status/{job_id}")
+def get_repository_review_status(job_id: str):
+    job = fetch_review_job(job_id)
+    return {
+        "job_id": job["id"],
+        "repository_url": job["repository_url"],
+        "mode": job["mode"],
+        "status": job["status"],
+        "progress": job["progress"],
+        "error": job["error"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+    }
+
+
+@app.get("/review/result/{job_id}")
+def get_repository_review_result(job_id: str):
+    job = fetch_review_job(job_id)
+    if job["status"] == "failed":
+        raise HTTPException(status_code=500, detail=job["error"] or "Repository review failed.")
+    if job["status"] != "completed":
+        raise HTTPException(status_code=202, detail={"status": job["status"], "progress": job["progress"]})
+    return {
+        "job_id": job["id"],
+        "repository_url": job["repository_url"],
+        "mode": job["mode"],
+        "status": job["status"],
+        "result": job["result"],
+    }
+
+
 @app.get("/api/metrics/{repository_id}")
 def get_metrics(repository_id: str):
     return fetch_one(
@@ -317,6 +400,65 @@ def get_recommendations(repository_id: str):
 @app.get("/api/analysis/{repository_id}")
 def get_analysis(repository_id: str):
     return get_repository_bundle(repository_id, raise_missing=True)
+
+
+def normalize_review_mode(mode: str) -> str:
+    cleaned = (mode or "Full Repository Review").strip()
+    if cleaned not in REVIEW_MODES:
+        raise HTTPException(status_code=400, detail=f"Unsupported review mode. Choose one of: {', '.join(sorted(REVIEW_MODES))}")
+    return cleaned
+
+
+def fetch_review_job(job_id: str):
+    with get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """SELECT id, username, repository_url, mode, status, progress, result, error, created_at, updated_at
+                   FROM repository_review_jobs WHERE id=%s""",
+                (job_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Repository review job not found")
+    return normalize_row(row)
+
+
+def update_review_job(job_id: str, status: str | None = None, progress: int | None = None, result=None, error: str | None = None):
+    fields = ["updated_at = CURRENT_TIMESTAMP"]
+    values: list[Any] = []
+    if status is not None:
+        fields.append("status = %s")
+        values.append(status)
+    if progress is not None:
+        fields.append("progress = %s")
+        values.append(max(0, min(100, progress)))
+    if result is not None:
+        fields.append("result = %s")
+        values.append(Json(result))
+    if error is not None:
+        fields.append("error = %s")
+        values.append(error)
+    values.append(job_id)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE repository_review_jobs SET {', '.join(fields)} WHERE id = %s", values)
+        conn.commit()
+
+
+def process_repository_review_job(job_id: str, repository_url: str, mode: str):
+    logger.info(json.dumps({"event": "repository_review_started", "job_id": job_id, "repository_url": repository_url, "mode": mode}))
+    try:
+        update_review_job(job_id, status="running", progress=5)
+
+        def set_progress(progress: int):
+            update_review_job(job_id, status="running", progress=progress)
+
+        result = run_repository_review(repository_url, mode, AI_SERVICE_URL, progress_callback=set_progress)
+        update_review_job(job_id, status="completed", progress=100, result=result, error="")
+        logger.info(json.dumps({"event": "repository_review_finished", "job_id": job_id}))
+    except Exception as exc:
+        logger.exception(json.dumps({"event": "repository_review_failed", "job_id": job_id}))
+        update_review_job(job_id, status="failed", progress=100, error=str(exc))
 
 
 def persist_analysis(cur, repository_id: str, analysis: dict[str, Any]) -> None:
