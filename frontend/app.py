@@ -609,6 +609,7 @@ def build_repository_report_download(result):
     report = payload.get("ai_report", "")
     summary = payload.get("summary", {})
     intelligence = payload.get("repository_intelligence", {})
+    release_readiness = intelligence.get("release_readiness", {})
     lines = [
         "# Repository Review Export",
         "",
@@ -626,6 +627,12 @@ def build_repository_report_download(result):
         "",
         "```json",
         json_dumps(intelligence.get("production_readiness_score", {})),
+        "```",
+        "",
+        "## AI Release Readiness Platform",
+        "",
+        "```json",
+        json_dumps(release_readiness),
         "```",
         "",
         "## Release Gate",
@@ -685,6 +692,7 @@ def json_dumps(value):
 
 def render_repository_intelligence(payload):
     intelligence = payload.get("repository_intelligence", {})
+    release_readiness = intelligence.get("release_readiness", {})
     readiness = intelligence.get("production_readiness_score", {})
     heatmap = intelligence.get("risk_heatmap", [])
     architecture = intelligence.get("architecture_diagram", {})
@@ -693,6 +701,53 @@ def render_repository_intelligence(payload):
     threat_model = intelligence.get("threat_model", {})
     prompt_injection_scan = intelligence.get("prompt_injection_scan", [])
     onboarding_guide = intelligence.get("onboarding_guide", {})
+
+    if release_readiness:
+        st.markdown("#### AI Release Readiness")
+        cards = release_readiness.get("dashboard_cards", [])
+        if cards:
+            cols = st.columns(min(4, len(cards)))
+            for index, card in enumerate(cards[:4]):
+                cols[index].metric(
+                    card.get("label", "Metric"),
+                    f"{card.get('value', 'N/A')}{card.get('unit', '')}",
+                    card.get("status", ""),
+                )
+        scores = release_readiness.get("scores", {})
+        if scores:
+            score_cols = st.columns(5)
+            labels = [
+                ("Security", "security"),
+                ("Performance", "performance"),
+                ("Deployment", "deployment"),
+                ("Cost", "cost_optimization"),
+                ("Maintainability", "maintainability"),
+            ]
+            for index, (label, key) in enumerate(labels):
+                score_cols[index].metric(label, scores.get(key, "N/A"))
+        if release_readiness.get("blockers"):
+            st.error(f"Release Decision: {release_readiness.get('decision', 'UNKNOWN')}")
+            st.table([{"Blocker": item} for item in release_readiness["blockers"]])
+        else:
+            st.success(f"Release Decision: {release_readiness.get('decision', 'UNKNOWN')}")
+        predictions = release_readiness.get("predictions", {})
+        if predictions:
+            st.table(
+                [
+                    {"Prediction": "Production Failure Risk", "Value": predictions.get("production_failure_risk", "N/A")},
+                    {"Prediction": "Deployment Failure Probability", "Value": f"{predictions.get('deployment_failure_probability', 'N/A')}%"},
+                    {"Prediction": "Cloud Cost Waste", "Value": predictions.get("cloud_cost_waste", "N/A")},
+                    {"Prediction": "Performance Bottlenecks", "Value": len(predictions.get("performance_bottlenecks", []))},
+                ]
+            )
+        if release_readiness.get("fix_now"):
+            st.markdown("#### Fix Now")
+            for index, item in enumerate(release_readiness["fix_now"][:6], start=1):
+                st.markdown(f"**{index}. {item.get('issue', 'Issue')}**")
+                st.caption(f"{item.get('file', '')} | {item.get('risk_level', '')} | {item.get('impact', '')}")
+                st.write(item.get("exact_fix", ""))
+                if item.get("fixed_code"):
+                    st.code(item["fixed_code"], language="yaml")
 
     if release_gate:
         st.markdown("#### Release Gate")

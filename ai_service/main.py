@@ -438,23 +438,37 @@ Local static analysis:
 Files selected for review:
 {format_repository_files(request.files)}
 
-Return a production-ready Markdown report with exactly these top-level sections:
+Return compact JSON suitable for dashboard cards. Do not return a long report.
 
-1. Project Overview
-2. Languages Used
-3. Frameworks Detected
-4. Architecture Summary
-5. Folder Structure Analysis
-6. Dependency Analysis
-7. Code Quality Report
-8. Security Findings
-9. Performance Issues
-10. Best Practice Violations
-11. Pipeline Review Report
-12. Risk Assessment
-13. Technical Debt Summary
-14. Maintainability Score
-15. Prioritized Action Plan
+Use this shape:
+{{
+  "release_readiness_score": 0,
+  "decision": "BLOCKED | APPROVED_WITH_WARNINGS | APPROVED",
+  "scores": {{
+    "security": 0,
+    "performance": 0,
+    "deployment": 0,
+    "cost_optimization": 0,
+    "maintainability": 0
+  }},
+  "blockers": [],
+  "fix_now": [
+    {{
+      "file": "",
+      "issue": "",
+      "impact": "",
+      "risk_level": "",
+      "exact_fix": "",
+      "fixed_code": ""
+    }}
+  ],
+  "predictions": {{
+    "production_failure_risk": "",
+    "deployment_failure_probability": 0,
+    "performance_bottlenecks": [],
+    "cloud_cost_waste": ""
+  }}
+}}
 
 Use the deterministic repository intelligence to make the report distinctive:
 - Reference the Production Readiness Score and weakest components.
@@ -469,6 +483,7 @@ Use the deterministic repository intelligence to make the report distinctive:
 Pipeline Review Report must explicitly evaluate GitHub Actions, Azure DevOps, Jenkins, and GitLab files when present. Identify hardcoded secrets, missing approvals, missing environment separation, inefficient stages, missing artifact management, missing caching, missing rollback strategy, missing test stages, missing code quality gates, and missing vulnerability scanning.
 
 Use severity labels Critical, High, Medium, Low. Include file paths for findings. If evidence is insufficient, say so and recommend what to inspect next. Do not invent files or line numbers that were not provided.
+Focus on actionable engineering decisions, not explanations.
 """
         report = azure_chat_completion(
             [

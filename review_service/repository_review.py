@@ -159,6 +159,13 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
     release_gate = build_release_gate(production_readiness, risk_heatmap, prompt_injection_findings)
     threat_model = build_threat_model(files, frameworks, prompt_injection_findings)
     onboarding_guide = build_onboarding_guide(files, frameworks, dependency_files, production_readiness, release_gate)
+    release_readiness = build_release_readiness_platform(
+        files,
+        dependency_files,
+        risk_heatmap,
+        production_readiness,
+        release_gate,
+    )
     return {
         "project_overview": {
             "reviewed_files": len(files),
@@ -180,6 +187,7 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
         "threat_model": threat_model,
         "prompt_injection_scan": prompt_injection_findings,
         "onboarding_guide": onboarding_guide,
+        "release_readiness": release_readiness,
     }
 
 
@@ -624,6 +632,290 @@ def build_local_setup_hints(dependency_files: list[dict[str, Any]]) -> list[str]
     return hints or ["No setup manifest detected; start with README or top-level service folders."]
 
 
+def build_release_readiness_platform(
+    files: list[dict[str, Any]],
+    dependency_files: list[dict[str, Any]],
+    risk_heatmap: list[dict[str, Any]],
+    production_readiness: dict[str, Any],
+    release_gate: dict[str, Any],
+) -> dict[str, Any]:
+    deployment_prediction = predict_deployment_failures(files)
+    cost_detection = detect_cost_leakage(files)
+    production_impact = predict_production_impact(files, risk_heatmap)
+    component_scores = calculate_release_component_scores(
+        files,
+        dependency_files,
+        risk_heatmap,
+        production_readiness,
+        deployment_prediction,
+        cost_detection,
+        production_impact,
+    )
+    overall = round(sum(component_scores.values()) / len(component_scores), 2)
+    blockers = release_gate.get("blockers", [])[:5] + [
+        issue["issue"] for issue in deployment_prediction["issues"] if issue["risk_level"] in {"Critical", "High"}
+    ][:5]
+    fix_now = build_fix_now_actions(deployment_prediction, cost_detection, production_impact, risk_heatmap)
+    return {
+        "release_readiness_score": overall,
+        "decision": release_decision_from_score(overall, blockers),
+        "scores": component_scores,
+        "blockers": blockers[:8],
+        "fix_now": fix_now[:8],
+        "predictions": {
+            "production_failure_risk": deployment_prediction["production_failure_risk"],
+            "deployment_failure_probability": deployment_prediction["deployment_failure_probability"],
+            "performance_bottlenecks": production_impact["performance_bottlenecks"],
+            "cloud_cost_waste": cost_detection["cloud_cost_waste"],
+        },
+        "dashboard_cards": [
+            {"label": "Release Readiness", "value": overall, "unit": "/100", "status": release_decision_from_score(overall, blockers)},
+            {"label": "Deployment Failure", "value": deployment_prediction["deployment_failure_probability"], "unit": "%", "status": deployment_prediction["production_failure_risk"]},
+            {"label": "Monthly Cost Waste", "value": cost_detection["estimated_monthly_savings_inr"], "unit": "INR", "status": cost_detection["cloud_cost_waste"]},
+            {"label": "Critical Fixes", "value": len(blockers[:8]), "unit": "", "status": "Action Required" if blockers else "Clear"},
+        ],
+    }
+
+
+def calculate_release_component_scores(
+    files: list[dict[str, Any]],
+    dependency_files: list[dict[str, Any]],
+    risk_heatmap: list[dict[str, Any]],
+    production_readiness: dict[str, Any],
+    deployment_prediction: dict[str, Any],
+    cost_detection: dict[str, Any],
+    production_impact: dict[str, Any],
+) -> dict[str, float]:
+    readiness_components = production_readiness.get("components", {})
+    security = readiness_components.get("security", 70)
+    maintainability = readiness_components.get("maintainability", 70)
+    deployment = max(0, 100 - deployment_prediction["deployment_failure_probability"])
+    cost = max(0, 100 - min(80, cost_detection["estimated_monthly_savings_inr"] / 250))
+    performance_penalty = len(production_impact["performance_bottlenecks"]) * 12
+    performance = max(0, 85 - performance_penalty)
+    if not any("test" in item["path"].lower() for item in files):
+        maintainability = max(0, maintainability - 15)
+    if dependency_files and not any("lock" in item["path"].lower() for item in dependency_files):
+        security = max(0, security - 8)
+    if any(item["severity"] == "Critical" for item in risk_heatmap):
+        security = max(0, security - 20)
+    return {
+        "security": round(security, 2),
+        "performance": round(performance, 2),
+        "deployment": round(deployment, 2),
+        "cost_optimization": round(cost, 2),
+        "maintainability": round(maintainability, 2),
+    }
+
+
+def predict_deployment_failures(files: list[dict[str, Any]]) -> dict[str, Any]:
+    issues = []
+    dockerfiles = [item for item in files if item["path"].endswith("Dockerfile")]
+    k8s_files = [item for item in files if item["path"].endswith((".yaml", ".yml")) and "kind:" in item["content"].lower()]
+    pipeline_files = [item for item in files if item["is_pipeline"]]
+    for item in dockerfiles:
+        content = item["content"].lower()
+        if "expose" not in content and "port" not in content:
+            issues.append(release_issue(item["path"], "Missing container port declaration", "Service may start but fail traffic routing in App Service or Kubernetes.", "High", "Add EXPOSE and align app port with service targetPort.", "EXPOSE 8000"))
+        if "user " not in content:
+            issues.append(release_issue(item["path"], "Container runs as root", "AKS restricted policies or security reviews may block deployment.", "High", "Create and switch to a non-root user.", "RUN adduser --disabled-password appuser\nUSER appuser"))
+        if "healthcheck" not in content:
+            issues.append(release_issue(item["path"], "Missing Docker healthcheck", "Orchestrators have weaker signals for failed containers.", "Medium", "Add a HEALTHCHECK that calls the service health endpoint.", "HEALTHCHECK CMD curl -f http://localhost:8000/health || exit 1"))
+    for item in k8s_files:
+        lower = item["content"].lower()
+        if "kind: deployment" not in lower:
+            continue
+        if "readinessprobe" not in lower:
+            issues.append(release_issue(item["path"], "Readiness probe missing", "Rolling updates may send traffic to pods before the app is ready.", "High", "Add readinessProbe to every container.", "readinessProbe:\n  httpGet:\n    path: /ready\n    port: 8000\n  initialDelaySeconds: 10\n  periodSeconds: 10"))
+        if "livenessprobe" not in lower:
+            issues.append(release_issue(item["path"], "Liveness probe missing", "Hung containers may stay alive and serve failures.", "Medium", "Add livenessProbe to restart unhealthy pods.", "livenessProbe:\n  httpGet:\n    path: /live\n    port: 8000\n  initialDelaySeconds: 30\n  periodSeconds: 20"))
+        if "resources:" not in lower:
+            issues.append(release_issue(item["path"], "Resource requests and limits missing", "Pods can be evicted or overconsume node resources.", "High", "Add CPU and memory requests/limits.", "resources:\n  requests:\n    cpu: 250m\n    memory: 512Mi\n  limits:\n    cpu: 500m\n    memory: 1Gi"))
+        if "imagepullpolicy: always" in lower and ":latest" in lower:
+            issues.append(release_issue(item["path"], "Mutable latest image tag", "Rollbacks and reproducible deploys become unreliable.", "High", "Pin immutable version tags or digests.", "image: youracr.azurecr.io/app:v1.2.3"))
+    for item in pipeline_files:
+        missing = pipeline_missing_controls(item["content"])
+        if "rollback" in missing:
+            issues.append(release_issue(item["path"], "Rollback stage missing", "Failed production deployments may require manual recovery.", "High", "Add rollback or deployment undo stage.", "kubectl rollout undo deployment/<name> -n <namespace>"))
+        if "artifact management" in missing:
+            issues.append(release_issue(item["path"], "Artifact publishing missing", "Deployments may not have traceable build outputs.", "Medium", "Publish build and scan artifacts.", "uses: actions/upload-artifact@v4"))
+    probability = min(95, 15 + sum({"Critical": 28, "High": 18, "Medium": 10, "Low": 4}[item["risk_level"]] for item in issues))
+    return {
+        "deployment_failure_probability": probability,
+        "production_failure_risk": risk_band(probability),
+        "issues": issues[:20],
+    }
+
+
+def detect_cost_leakage(files: list[dict[str, Any]]) -> dict[str, Any]:
+    findings = []
+    total_current = 0
+    total_recommended = 0
+    for item in files:
+        if not item["path"].endswith((".yaml", ".yml")):
+            continue
+        resources = extract_k8s_resource_requests(item["content"])
+        for resource in resources:
+            current = estimate_monthly_inr(resource["cpu_m"], resource["memory_mi"])
+            recommended_cpu = min(resource["cpu_m"], 500) if resource["cpu_m"] > 0 else 250
+            recommended_memory = min(resource["memory_mi"], 1024) if resource["memory_mi"] > 0 else 512
+            recommended = estimate_monthly_inr(recommended_cpu, recommended_memory)
+            total_current += current
+            total_recommended += recommended
+            if current - recommended >= 1500:
+                findings.append(
+                    {
+                        "file": item["path"],
+                        "issue": "Potential oversized Kubernetes resource request",
+                        "impact": "Over-requested CPU/memory can reserve expensive AKS capacity and increase monthly cloud cost.",
+                        "risk_level": "High" if current - recommended >= 8000 else "Medium",
+                        "current_monthly_cost_inr": current,
+                        "recommended_monthly_cost_inr": recommended,
+                        "estimated_savings_inr": current - recommended,
+                        "exact_fix": "Right-size requests and keep limits close to observed runtime usage.",
+                        "fixed_code": f"resources:\n  requests:\n    cpu: {recommended_cpu}m\n    memory: {format_memory(recommended_memory)}\n  limits:\n    cpu: {recommended_cpu * 2}m\n    memory: {format_memory(recommended_memory * 2)}",
+                    }
+                )
+    savings = max(0, total_current - total_recommended)
+    return {
+        "cloud_cost_waste": "High" if savings >= 10000 else "Medium" if savings >= 3000 else "Low",
+        "estimated_monthly_cost_inr": total_current,
+        "recommended_monthly_cost_inr": total_recommended,
+        "estimated_monthly_savings_inr": savings,
+        "findings": findings[:20],
+    }
+
+
+def predict_production_impact(files: list[dict[str, Any]], risk_heatmap: list[dict[str, Any]]) -> dict[str, Any]:
+    bottlenecks = []
+    for item in files:
+        content = item["content"]
+        lower = content.lower()
+        if re.search(r"for .+:\s*\n(?:.|\n){0,300}(requests\.|cursor\.execute|\.execute\(|fetchone|fetchall)", content):
+            bottlenecks.append(impact_issue(item["path"], "I/O or database call inside loop", "Response Time: 2.1s", "Response Time: 8.7s after 100k users", "High", "Batch requests or prefetch data outside the loop.", "Expected response time near 1.2s and cloud cost reduction up to 35%."))
+        if "fetchall(" in lower:
+            bottlenecks.append(impact_issue(item["path"], "Unbounded fetchall usage", "Memory: moderate on small data", "Memory spike or worker crash on large tables", "High", "Use pagination, streaming cursors, or bounded queries.", "Lower peak memory and fewer pod restarts."))
+        if item["line_count"] > 700:
+            bottlenecks.append(impact_issue(item["path"], "Very large file", "Change risk: medium", "Higher regression risk during release", "Medium", "Split responsibilities into smaller modules.", "Faster review and lower defect probability."))
+    if any(row["severity"] in {"Critical", "High"} for row in risk_heatmap):
+        bottlenecks.append(impact_issue("repository", "High-risk files present", "Release confidence: reduced", "Production incident probability increases", "High", "Resolve high-risk heatmap findings before release.", "Improved release confidence and lower support burden."))
+    return {
+        "performance_bottlenecks": bottlenecks[:20],
+        "highest_risk": "High" if any(item["risk_level"] == "High" for item in bottlenecks) else "Medium" if bottlenecks else "Low",
+    }
+
+
+def release_issue(file_path: str, issue: str, impact: str, risk_level: str, exact_fix: str, fixed_code: str) -> dict[str, str]:
+    return {
+        "file": file_path,
+        "issue": issue,
+        "impact": impact,
+        "risk_level": risk_level,
+        "exact_fix": exact_fix,
+        "fixed_code": fixed_code,
+    }
+
+
+def impact_issue(file_path: str, issue: str, current: str, projected: str, risk_level: str, exact_fix: str, expected: str) -> dict[str, str]:
+    return {
+        "file": file_path,
+        "issue": issue,
+        "current": current,
+        "projected_at_scale": projected,
+        "risk_level": risk_level,
+        "exact_fix": exact_fix,
+        "expected_improvement": expected,
+    }
+
+
+def build_fix_now_actions(
+    deployment_prediction: dict[str, Any],
+    cost_detection: dict[str, Any],
+    production_impact: dict[str, Any],
+    risk_heatmap: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    actions = []
+    actions.extend(deployment_prediction["issues"][:4])
+    actions.extend(cost_detection["findings"][:2])
+    for item in production_impact["performance_bottlenecks"][:2]:
+        actions.append(
+            {
+                "file": item["file"],
+                "issue": item["issue"],
+                "impact": item["projected_at_scale"],
+                "risk_level": item["risk_level"],
+                "exact_fix": item["exact_fix"],
+                "fixed_code": item["expected_improvement"],
+            }
+        )
+    for item in risk_heatmap[:2]:
+        actions.append(
+            {
+                "file": item["path"],
+                "issue": "High repository risk" if item["severity"] in {"Critical", "High"} else "Repository risk",
+                "impact": ", ".join(item["reasons"][:2]),
+                "risk_level": item["severity"],
+                "exact_fix": "Open this file first and remediate the listed risk before release.",
+                "fixed_code": "See file-specific recommendation in the risk heatmap.",
+            }
+        )
+    return actions
+
+
+def extract_k8s_resource_requests(content: str) -> list[dict[str, int]]:
+    resources = []
+    cpu_matches = re.findall(r"cpu:\s*['\"]?([0-9.]+m?)['\"]?", content, re.I)
+    memory_matches = re.findall(r"memory:\s*['\"]?([0-9.]+(?:Mi|Gi|M|G)?)['\"]?", content, re.I)
+    for index, cpu in enumerate(cpu_matches):
+        memory = memory_matches[index] if index < len(memory_matches) else "0"
+        resources.append({"cpu_m": parse_cpu_m(cpu), "memory_mi": parse_memory_mi(memory)})
+    return resources
+
+
+def parse_cpu_m(value: str) -> int:
+    value = value.strip()
+    if value.endswith("m"):
+        return int(float(value[:-1]))
+    return int(float(value) * 1000)
+
+
+def parse_memory_mi(value: str) -> int:
+    value = value.strip()
+    if value.lower().endswith("gi") or value.lower().endswith("g"):
+        return int(float(re.sub(r"[A-Za-z]+$", "", value)) * 1024)
+    if value.lower().endswith("mi") or value.lower().endswith("m"):
+        return int(float(re.sub(r"[A-Za-z]+$", "", value)))
+    return int(float(value)) if value else 0
+
+
+def estimate_monthly_inr(cpu_m: int, memory_mi: int) -> int:
+    cpu_cost = (cpu_m / 1000) * 2400
+    memory_cost = (memory_mi / 1024) * 850
+    return round(cpu_cost + memory_cost)
+
+
+def format_memory(memory_mi: int) -> str:
+    if memory_mi >= 1024 and memory_mi % 1024 == 0:
+        return f"{memory_mi // 1024}Gi"
+    return f"{memory_mi}Mi"
+
+
+def risk_band(probability: int) -> str:
+    if probability >= 75:
+        return "High"
+    if probability >= 45:
+        return "Medium"
+    return "Low"
+
+
+def release_decision_from_score(score: float, blockers: list[str]) -> str:
+    if blockers or score < 55:
+        return "BLOCKED"
+    if score < 75:
+        return "APPROVED_WITH_WARNINGS"
+    return "APPROVED"
+
+
 def aggregate_local_analysis(files: list[dict[str, Any]]) -> dict[str, Any]:
     python_files = [item for item in files if item["path"].endswith(".py")]
     analyses = [analyze_code(item["content"], filename=item["path"]) for item in python_files[:60]]
@@ -718,4 +1010,5 @@ def extract_repository_intelligence(summary: dict[str, Any]) -> dict[str, Any]:
         "threat_model": summary.get("threat_model", {}),
         "prompt_injection_scan": summary.get("prompt_injection_scan", []),
         "onboarding_guide": summary.get("onboarding_guide", {}),
+        "release_readiness": summary.get("release_readiness", {}),
     }

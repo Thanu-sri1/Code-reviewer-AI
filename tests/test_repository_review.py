@@ -75,3 +75,41 @@ def test_scan_repository_builds_release_gate_threat_model_and_onboarding(tmp_pat
     assert intelligence["threat_model"]["stride"]
     assert "GitHub repository URL input" in intelligence["threat_model"]["entry_points"]
     assert intelligence["onboarding_guide"]["first_day_tasks"]
+
+
+def test_scan_repository_builds_release_readiness_platform(tmp_path):
+    (tmp_path / "Dockerfile").write_text("FROM python:3.10-slim\nCMD uvicorn main:app\n")
+    (tmp_path / "k8s").mkdir()
+    (tmp_path / "k8s" / "deployment.yaml").write_text(
+        """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        image: example/api:latest
+        resources:
+          requests:
+            cpu: "4"
+            memory: 8Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+"""
+    )
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "deploy.yml").write_text("name: Deploy\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n")
+
+    result = scan_repository(tmp_path)
+    release = result["summary"]["release_readiness"]
+
+    assert release["release_readiness_score"] < 80
+    assert release["predictions"]["deployment_failure_probability"] >= 45
+    assert release["predictions"]["cloud_cost_waste"] in {"Medium", "High"}
+    assert release["fix_now"]
+    assert release["scores"]["cost_optimization"] < 100
