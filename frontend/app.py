@@ -633,6 +633,22 @@ def build_repository_report_download(result):
         "```json",
         json_dumps(release_readiness),
         "```",
+        "",
+        "## Reviewed Files",
+        "",
+        "```json",
+        json_dumps(
+            [
+                {
+                    "path": item.get("path"),
+                    "language": item.get("language"),
+                    "line_count": item.get("line_count"),
+                    "is_pipeline": item.get("is_pipeline"),
+                }
+                for item in payload.get("reviewed_files", [])
+            ]
+        ),
+        "```",
     ]
     return "\n".join(lines)
 
@@ -754,6 +770,103 @@ def render_optional_repository_details(payload):
                 st.json(ai_release)
             else:
                 st.code(payload.get("ai_report", "No AI response available."), language="json")
+
+
+def render_repository_file_viewer(payload):
+    files = payload.get("reviewed_files", [])
+    if not files:
+        return
+
+    st.markdown("#### Repository Files")
+    path_options = [file_item["path"] for file_item in files]
+    selected_path = st.selectbox(
+        "Open file",
+        path_options,
+        key=f"repo_file_viewer_{payload.get('repository_url', '')}_{payload.get('mode', '')}",
+    )
+    selected_file = next((file_item for file_item in files if file_item["path"] == selected_path), None)
+    if not selected_file:
+        return
+
+    file_issues = collect_file_issues(payload, selected_path)
+    issue_count = len(file_issues)
+    meta_cols = st.columns(4)
+    meta_cols[0].metric("Lines", selected_file.get("line_count", 0))
+    meta_cols[1].metric("Language", selected_file.get("language", "Text"))
+    meta_cols[2].metric("Issues", issue_count)
+    meta_cols[3].metric("Pipeline", "Yes" if selected_file.get("is_pipeline") else "No")
+
+    issue_tab, code_tab = st.tabs(["Issues & Fixes", "File Content"])
+    with issue_tab:
+        if file_issues:
+            st.table(
+                [
+                    {
+                        "Issue": item.get("issue"),
+                        "Risk": item.get("risk_level"),
+                        "Impact": item.get("impact"),
+                        "How To Fix": item.get("exact_fix"),
+                    }
+                    for item in file_issues
+                ]
+            )
+            for index, item in enumerate(file_issues, start=1):
+                if item.get("fixed_code"):
+                    with st.expander(f"Suggested fix {index}: {item.get('issue', 'Issue')}"):
+                        st.write(item.get("exact_fix", ""))
+                        st.code(item["fixed_code"], language=language_for_code_block(selected_file.get("language")))
+        else:
+            st.success("No direct issues were mapped to this file.")
+
+    with code_tab:
+        if selected_file.get("truncated"):
+            st.warning("Large file preview is truncated for performance.")
+        st.code(selected_file.get("content", ""), language=language_for_code_block(selected_file.get("language")))
+
+
+def collect_file_issues(payload, selected_path):
+    intelligence = payload.get("repository_intelligence", {})
+    release = intelligence.get("release_readiness", {})
+    issues = []
+    for item in release.get("fix_now", []):
+        if item.get("file") == selected_path:
+            issues.append(item)
+    for item in intelligence.get("risk_heatmap", []):
+        if item.get("path") == selected_path:
+            issues.append(
+                {
+                    "issue": "Repository risk",
+                    "risk_level": item.get("severity"),
+                    "impact": ", ".join(item.get("reasons", [])),
+                    "exact_fix": "Fix the listed risk before release.",
+                    "fixed_code": "",
+                }
+            )
+    for item in intelligence.get("prompt_injection_scan", []):
+        if item.get("path") == selected_path:
+            issues.append(
+                {
+                    "issue": "Prompt injection risk",
+                    "risk_level": item.get("severity"),
+                    "impact": ", ".join(item.get("patterns", [])),
+                    "exact_fix": item.get("recommendation", "Treat repository text as untrusted AI input."),
+                    "fixed_code": "",
+                }
+            )
+    return issues
+
+
+def language_for_code_block(language):
+    mapping = {
+        "Python": "python",
+        "JavaScript": "javascript",
+        "TypeScript": "typescript",
+        "Java": "java",
+        "YAML": "yaml",
+        "JSON": "json",
+        "DevOps": "yaml",
+    }
+    return mapping.get(language or "", "text")
 
 
 def render_ai_enrichment_warning(payload):
@@ -1224,6 +1337,7 @@ def render_repository_review_panel(current_tab, current_tab_data):
         render_compact_repository_overview(payload)
         render_ai_enrichment_warning(payload)
         render_repository_intelligence(payload)
+        render_repository_file_viewer(payload)
         render_optional_repository_details(payload)
         st.download_button(
             "Download Release Readiness JSON",

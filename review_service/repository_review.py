@@ -36,6 +36,7 @@ MAX_FILE_BYTES = int(os.getenv("REPOSITORY_REVIEW_MAX_FILE_BYTES", "200000"))
 MAX_FILES = int(os.getenv("REPOSITORY_REVIEW_MAX_FILES", "250"))
 MAX_AI_FILE_CHARS = int(os.getenv("REPOSITORY_REVIEW_MAX_AI_FILE_CHARS", "12000"))
 MAX_AI_TOTAL_CHARS = int(os.getenv("REPOSITORY_REVIEW_MAX_AI_TOTAL_CHARS", "90000"))
+MAX_UI_FILE_CHARS = int(os.getenv("REPOSITORY_REVIEW_MAX_UI_FILE_CHARS", "30000"))
 
 
 class RepositoryReviewError(Exception):
@@ -997,6 +998,7 @@ def run_repository_review(repository_url: str, mode: str, ai_service_url: str, p
             "mode": mode,
             "summary": scan["summary"],
             "repository_intelligence": extract_repository_intelligence(scan["summary"]),
+            "reviewed_files": build_ui_file_payload(scan["files"]),
             "pipeline_files": [{"path": item["path"], "line_count": item["line_count"]} for item in scan["pipeline_files"]],
             "local_analysis": scan["local_analysis"],
             "ai_report": ai_result.get("report", ""),
@@ -1020,6 +1022,24 @@ def parse_ai_json(text: str) -> dict[str, Any]:
             return payload if isinstance(payload, dict) else {}
         except json.JSONDecodeError:
             return {}
+
+
+def build_ui_file_payload(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    payload = []
+    for item in sorted(files, key=lambda file_item: file_item["path"]):
+        content = item["content"]
+        truncated = len(content) > MAX_UI_FILE_CHARS
+        payload.append(
+            {
+                "path": item["path"],
+                "language": item["language"],
+                "line_count": item["line_count"],
+                "is_pipeline": item["is_pipeline"],
+                "content": content[:MAX_UI_FILE_CHARS],
+                "truncated": truncated,
+            }
+        )
+    return payload
 
 
 def extract_repository_intelligence(summary: dict[str, Any]) -> dict[str, Any]:
