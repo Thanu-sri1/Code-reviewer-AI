@@ -984,7 +984,12 @@ def run_repository_review(repository_url: str, mode: str, ai_service_url: str, p
         if progress_callback:
             progress_callback(65)
         ai_payload = build_ai_payload(scan, repository_url, mode)
-        ai_result = call_ai_repository_review(ai_service_url, ai_payload)
+        ai_error = ""
+        try:
+            ai_result = call_ai_repository_review(ai_service_url, ai_payload)
+        except RepositoryReviewError as exc:
+            ai_result = {"report": ""}
+            ai_error = str(exc)
         if progress_callback:
             progress_callback(90)
         return {
@@ -996,6 +1001,7 @@ def run_repository_review(repository_url: str, mode: str, ai_service_url: str, p
             "local_analysis": scan["local_analysis"],
             "ai_report": ai_result.get("report", ""),
             "ai_release_readiness": parse_ai_json(ai_result.get("report", "")),
+            "ai_error": ai_error,
         }
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)

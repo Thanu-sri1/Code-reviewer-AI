@@ -704,7 +704,10 @@ def render_repository_intelligence(payload):
                 if item.get("fixed_code"):
                     with st.expander(f"Fix {index}: {item.get('issue', 'Issue')}"):
                         st.caption(item.get("file", ""))
+                        st.write(item.get("exact_fix", ""))
                         st.code(item["fixed_code"], language="yaml")
+        else:
+            st.success("No immediate release blockers were detected. Review optional details before production deployment.")
 
     if prompt_injection_scan:
         st.markdown("#### AI Safety Warnings")
@@ -720,8 +723,59 @@ def render_repository_intelligence(payload):
             ]
         )
 
-    with st.expander("Advanced details"):
-        st.json(intelligence)
+
+def render_compact_repository_overview(payload):
+    summary = payload.get("summary", {})
+    overview = summary.get("project_overview", {})
+    languages = summary.get("languages_used", {})
+    frameworks = summary.get("frameworks_detected", [])
+
+    st.markdown("#### Repository Overview")
+    cols = st.columns(4)
+    cols[0].metric("Files Reviewed", overview.get("reviewed_files", 0))
+    cols[1].metric("Lines Reviewed", overview.get("reviewed_lines", 0))
+    cols[2].metric("Pipeline Files", overview.get("pipeline_files", 0))
+    cols[3].metric("Languages", len(languages))
+
+    if languages:
+        st.caption("Languages: " + ", ".join(f"{name} ({count})" for name, count in languages.items()))
+    if frameworks:
+        st.caption("Detected: " + ", ".join(frameworks))
+
+
+def render_optional_repository_details(payload):
+    with st.expander("Show full technical details"):
+        detail_tab, ai_tab = st.tabs(["Repository data", "AI JSON"])
+        with detail_tab:
+            st.json(payload.get("summary", {}))
+        with ai_tab:
+            ai_release = payload.get("ai_release_readiness") or {}
+            if ai_release:
+                st.json(ai_release)
+            else:
+                st.code(payload.get("ai_report", "No AI response available."), language="json")
+
+
+def render_ai_enrichment_warning(payload):
+    ai_error = payload.get("ai_error")
+    if not ai_error:
+        return
+    st.warning("AI enrichment was unavailable, so the dashboard used built-in repository analysis.")
+    lowered = ai_error.lower()
+    if "azure openai config missing" in lowered:
+        render_error_suggestions([
+            "Check your local .env file.",
+            "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.",
+            "Restart Docker Compose with docker compose up --build.",
+        ])
+    elif "name or service not known" in lowered:
+        render_error_suggestions([
+            "Check AZURE_OPENAI_ENDPOINT spelling.",
+            "Verify the ai-service container has internet/DNS access.",
+            "Restart ai-service after changing .env.",
+        ])
+    else:
+        render_error_suggestions(["Check ai-service logs for the AI enrichment error."])
 
 
 def get_sorted_tabs():
@@ -1167,14 +1221,12 @@ def render_repository_review_panel(current_tab, current_tab_data):
     result = st.session_state["tabs"][current_tab].get("repository_review_result")
     if result:
         payload = result.get("result", {})
-        summary = payload.get("summary", {})
+        render_compact_repository_overview(payload)
+        render_ai_enrichment_warning(payload)
         render_repository_intelligence(payload)
-        st.markdown("#### Repository Summary")
-        st.json(summary)
-        st.markdown("#### Repository Review Report")
-        st.markdown(payload.get("ai_report", "No repository report available."))
+        render_optional_repository_details(payload)
         st.download_button(
-            "Download Repository Report",
+            "Download Release Readiness JSON",
             data=build_repository_report_download(result),
             file_name=f"repository-review-{job_id}.md",
             mime="text/markdown",
