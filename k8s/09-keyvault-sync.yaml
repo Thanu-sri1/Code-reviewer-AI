@@ -5,6 +5,8 @@ metadata:
   namespace: codereviewer
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: keyvault-secret-sync
