@@ -628,6 +628,30 @@ def build_repository_report_download(result):
         json_dumps(intelligence.get("production_readiness_score", {})),
         "```",
         "",
+        "## Release Gate",
+        "",
+        "```json",
+        json_dumps(intelligence.get("release_gate", {})),
+        "```",
+        "",
+        "## Threat Model",
+        "",
+        "```json",
+        json_dumps(intelligence.get("threat_model", {})),
+        "```",
+        "",
+        "## Prompt Injection Scan",
+        "",
+        "```json",
+        json_dumps(intelligence.get("prompt_injection_scan", [])),
+        "```",
+        "",
+        "## Onboarding Guide",
+        "",
+        "```json",
+        json_dumps(intelligence.get("onboarding_guide", {})),
+        "```",
+        "",
         "## Risk Heatmap",
         "",
         "```json",
@@ -665,6 +689,25 @@ def render_repository_intelligence(payload):
     heatmap = intelligence.get("risk_heatmap", [])
     architecture = intelligence.get("architecture_diagram", {})
     sprint_plan = intelligence.get("sprint_fix_plan", [])
+    release_gate = intelligence.get("release_gate", {})
+    threat_model = intelligence.get("threat_model", {})
+    prompt_injection_scan = intelligence.get("prompt_injection_scan", [])
+    onboarding_guide = intelligence.get("onboarding_guide", {})
+
+    if release_gate:
+        st.markdown("#### Release Gate")
+        decision = release_gate.get("decision", "UNKNOWN")
+        if decision == "BLOCKED":
+            st.error(f"Release Decision: {decision}")
+        elif decision == "APPROVED_WITH_WARNINGS":
+            st.warning(f"Release Decision: {decision}")
+        else:
+            st.success(f"Release Decision: {decision}")
+        if release_gate.get("blockers"):
+            st.table([{"Blocker": item} for item in release_gate["blockers"]])
+        if release_gate.get("warnings"):
+            st.table([{"Warning": item} for item in release_gate["warnings"]])
+        st.caption(release_gate.get("next_action", ""))
 
     if readiness:
         st.markdown("#### Production Readiness")
@@ -691,6 +734,32 @@ def render_repository_intelligence(payload):
             ]
         )
 
+    if prompt_injection_scan:
+        st.markdown("#### Prompt Injection Scan")
+        st.table(
+            [
+                {
+                    "Severity": item.get("severity"),
+                    "File": item.get("path"),
+                    "Patterns": ", ".join(item.get("patterns", [])),
+                    "Recommendation": item.get("recommendation"),
+                }
+                for item in prompt_injection_scan
+            ]
+        )
+
+    if threat_model:
+        st.markdown("#### Threat Model")
+        model_tabs = st.tabs(["Assets", "Entry Points", "Trust Boundaries", "STRIDE"])
+        with model_tabs[0]:
+            st.table([{"Asset": item} for item in threat_model.get("assets", [])])
+        with model_tabs[1]:
+            st.table([{"Entry Point": item} for item in threat_model.get("entry_points", [])])
+        with model_tabs[2]:
+            st.table([{"Trust Boundary": item} for item in threat_model.get("trust_boundaries", [])])
+        with model_tabs[3]:
+            st.table(threat_model.get("stride", []))
+
     if architecture.get("diagram"):
         st.markdown("#### Architecture Diagram")
         st.code(architecture["diagram"], language="mermaid")
@@ -701,6 +770,21 @@ def render_repository_intelligence(payload):
             st.markdown(f"**{sprint.get('name', 'Sprint')}**")
             st.caption(sprint.get("goal", ""))
             st.table([{"Task": task} for task in sprint.get("tasks", [])])
+
+    if onboarding_guide:
+        st.markdown("#### Codebase Onboarding Guide")
+        st.write(f"Repo type: {onboarding_guide.get('repo_type', 'Unknown')}")
+        st.write("Frameworks to learn")
+        st.table([{"Framework": item} for item in onboarding_guide.get("frameworks_to_learn", [])])
+        guide_tabs = st.tabs(["Important Files", "Local Setup", "First Day Tasks", "Questions"])
+        with guide_tabs[0]:
+            st.table([{"File": item} for item in onboarding_guide.get("important_files", [])])
+        with guide_tabs[1]:
+            st.table([{"Hint": item} for item in onboarding_guide.get("local_setup_hints", [])])
+        with guide_tabs[2]:
+            st.table([{"Task": item} for item in onboarding_guide.get("first_day_tasks", [])])
+        with guide_tabs[3]:
+            st.table([{"Question": item} for item in onboarding_guide.get("questions_new_developer_should_ask", [])])
 
 
 def get_sorted_tabs():

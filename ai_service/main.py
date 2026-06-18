@@ -458,6 +458,10 @@ Return a production-ready Markdown report with exactly these top-level sections:
 
 Use the deterministic repository intelligence to make the report distinctive:
 - Reference the Production Readiness Score and weakest components.
+- Start the Prioritized Action Plan from the Release Gate blockers and warnings.
+- Include the Threat Model risks in Security Findings.
+- Explain any Prompt Injection Scan findings as AI-specific supply-chain risk.
+- Summarize the Codebase Onboarding Guide for new contributors.
 - Explain the Risk Heatmap using specific high-risk files.
 - Include the Mermaid Architecture Diagram exactly if it is provided.
 - Convert the Sprint Fix Plan into practical implementation work.

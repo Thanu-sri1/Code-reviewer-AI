@@ -152,9 +152,13 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
     languages = Counter(item["language"] for item in files)
     dependency_files = find_dependency_files(root)
     frameworks = detect_frameworks(files, dependency_files)
+    prompt_injection_findings = scan_prompt_injection_risks(files)
     risk_heatmap = build_risk_heatmap(files)
     production_readiness = calculate_production_readiness(files, dependency_files, risk_heatmap)
     sprint_plan = build_sprint_fix_plan(files, dependency_files, risk_heatmap, production_readiness)
+    release_gate = build_release_gate(production_readiness, risk_heatmap, prompt_injection_findings)
+    threat_model = build_threat_model(files, frameworks, prompt_injection_findings)
+    onboarding_guide = build_onboarding_guide(files, frameworks, dependency_files, production_readiness, release_gate)
     return {
         "project_overview": {
             "reviewed_files": len(files),
@@ -172,6 +176,10 @@ def build_repository_summary(root: Path, files: list[dict[str, Any]]) -> dict[st
         "risk_heatmap": risk_heatmap,
         "architecture_diagram": build_architecture_diagram(files, frameworks),
         "sprint_fix_plan": sprint_plan,
+        "release_gate": release_gate,
+        "threat_model": threat_model,
+        "prompt_injection_scan": prompt_injection_findings,
+        "onboarding_guide": onboarding_guide,
     }
 
 
@@ -438,6 +446,184 @@ def build_sprint_fix_plan(
     return sprints
 
 
+def build_release_gate(
+    production_readiness: dict[str, Any],
+    risk_heatmap: list[dict[str, Any]],
+    prompt_injection_findings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    blockers = []
+    warnings = []
+    critical = [item for item in risk_heatmap if item["severity"] == "Critical"]
+    high = [item for item in risk_heatmap if item["severity"] == "High"]
+    readiness = production_readiness.get("overall", 0)
+    if critical:
+        blockers.extend([f"Critical repository risk in {item['path']}" for item in critical[:5]])
+    if len(high) >= 3:
+        blockers.append(f"{len(high)} high-severity repository risks require remediation before release.")
+    if readiness < 50:
+        blockers.append(f"Production readiness is {readiness}, below the release threshold of 50.")
+    if prompt_injection_findings:
+        blockers.append("Repository contains text that may attempt prompt injection against AI review workflows.")
+    for control in production_readiness.get("missing_pipeline_controls", [])[:5]:
+        warnings.append(f"Missing pipeline control: {control}.")
+    if readiness < 70 and readiness >= 50:
+        warnings.append(f"Production readiness is {readiness}; release should be conditional on hardening tasks.")
+
+    if blockers:
+        decision = "BLOCKED"
+    elif warnings:
+        decision = "APPROVED_WITH_WARNINGS"
+    else:
+        decision = "APPROVED"
+    return {
+        "decision": decision,
+        "readiness_threshold": 70,
+        "blockers": blockers,
+        "warnings": warnings,
+        "next_action": release_next_action(decision),
+    }
+
+
+def release_next_action(decision: str) -> str:
+    if decision == "BLOCKED":
+        return "Resolve blockers, rerun repository review, and require approval before deployment."
+    if decision == "APPROVED_WITH_WARNINGS":
+        return "Create follow-up issues for warnings and proceed only with owner sign-off."
+    return "Proceed with normal release checks."
+
+
+def scan_prompt_injection_risks(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    patterns = {
+        "instruction_override": re.compile(r"ignore (all )?(previous|above|prior) instructions", re.I),
+        "secret_exfiltration": re.compile(r"(reveal|print|dump|send).{0,40}(secret|api key|token|environment variable|system prompt)", re.I),
+        "role_manipulation": re.compile(r"(you are now|act as|developer mode|jailbreak)", re.I),
+        "tool_abuse": re.compile(r"(run|execute).{0,30}(curl|wget|powershell|bash|cmd|rm -rf)", re.I),
+    }
+    findings = []
+    for item in files:
+        matches = []
+        for name, pattern in patterns.items():
+            if pattern.search(item["content"]):
+                matches.append(name)
+        if matches:
+            findings.append(
+                {
+                    "path": item["path"],
+                    "severity": "High" if "secret_exfiltration" in matches or "instruction_override" in matches else "Medium",
+                    "patterns": matches,
+                    "recommendation": "Treat this file as untrusted prompt content; quote it, delimit it, and instruct the model not to follow repository instructions.",
+                }
+            )
+    return findings[:20]
+
+
+def build_threat_model(
+    files: list[dict[str, Any]],
+    frameworks: list[str],
+    prompt_injection_findings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    has_frontend = any(item["path"].startswith("frontend/") for item in files)
+    has_api = any("fastapi" in item["content"].lower() or item["path"].endswith("_service/main.py") for item in files)
+    has_k8s = any("apiversion:" in item["content"].lower() and "kind:" in item["content"].lower() for item in files)
+    has_pipeline = any(item["is_pipeline"] for item in files)
+    assets = ["source code", "review reports", "repository URLs", "AI prompts and responses"]
+    if any("DATABASE_URL" in item["content"] or "postgres" in item["content"].lower() for item in files):
+        assets.append("application database")
+    if any("AZURE_OPENAI" in item["content"] for item in files):
+        assets.append("Azure OpenAI credentials")
+    entry_points = []
+    if has_frontend:
+        entry_points.append("browser frontend")
+    if has_api:
+        entry_points.append("FastAPI service endpoints")
+    if has_pipeline:
+        entry_points.append("CI/CD pipeline triggers")
+    entry_points.append("GitHub repository URL input")
+    trust_boundaries = [
+        "user browser to frontend",
+        "frontend to internal services",
+        "review service to cloned repository content",
+        "review service to Azure OpenAI",
+    ]
+    if has_k8s:
+        trust_boundaries.append("cluster ingress to Kubernetes services")
+
+    stride = [
+        {"category": "Spoofing", "risk": "Unauthenticated or weakly authenticated users may impersonate reviewers.", "mitigation": "Require authentication and signed tokens on review actions."},
+        {"category": "Tampering", "risk": "Repository content can manipulate review inputs or pipeline definitions.", "mitigation": "Treat cloned files as untrusted, scan prompt injection, and never execute repository code."},
+        {"category": "Repudiation", "risk": "Review decisions may lack audit trail.", "mitigation": "Persist job owner, repository URL, mode, timestamp, and release decision."},
+        {"category": "Information Disclosure", "risk": "Secrets may be sent to AI if committed in source.", "mitigation": "Redact detected secrets before AI calls and fail release gates on credential findings."},
+        {"category": "Denial of Service", "risk": "Large repositories can exhaust clone, scan, or token budgets.", "mitigation": "Keep file count, file size, timeout, and token limits enforced."},
+        {"category": "Elevation of Privilege", "risk": "Pipeline misconfiguration can deploy unreviewed changes.", "mitigation": "Require environment approvals, quality gates, and vulnerability scans."},
+    ]
+    if prompt_injection_findings:
+        stride.append(
+            {
+                "category": "AI Prompt Injection",
+                "risk": f"{len(prompt_injection_findings)} files contain possible model-instruction attacks.",
+                "mitigation": "Delimit repository content, ignore instructions inside files, and review flagged files manually.",
+            }
+        )
+    return {
+        "assets": assets,
+        "entry_points": entry_points,
+        "trust_boundaries": trust_boundaries,
+        "framework_context": frameworks,
+        "stride": stride,
+    }
+
+
+def build_onboarding_guide(
+    files: list[dict[str, Any]],
+    frameworks: list[str],
+    dependency_files: list[dict[str, Any]],
+    production_readiness: dict[str, Any],
+    release_gate: dict[str, Any],
+) -> dict[str, Any]:
+    top_folders = folder_structure(files)["top_level_folders"]
+    important_files = []
+    for candidate in ("README.md", "docker-compose.yml", "requirements.txt", "package.json", "Dockerfile", "azure-pipelines.yml", "Jenkinsfile"):
+        important_files.extend(item["path"] for item in files if item["path"].endswith(candidate))
+    important_files.extend(item["path"] for item in files if item["is_pipeline"])
+    first_tasks = [
+        f"Review release decision: {release_gate['decision']}.",
+        "Read the architecture diagram and identify service boundaries.",
+        "Run the test suite or add tests if no tests are detected.",
+        "Inspect the risk heatmap before making changes.",
+    ]
+    if production_readiness.get("overall", 0) < 70:
+        first_tasks.append("Prioritize the sprint fix plan before feature work.")
+    return {
+        "repo_type": infer_architecture(files),
+        "frameworks_to_learn": frameworks or ["No framework confidently detected"],
+        "important_folders": top_folders,
+        "important_files": sorted(set(important_files))[:20],
+        "local_setup_hints": build_local_setup_hints(dependency_files),
+        "first_day_tasks": first_tasks,
+        "questions_new_developer_should_ask": [
+            "Which findings are release blockers?",
+            "Which service owns authentication and authorization?",
+            "Where are secrets stored and rotated?",
+            "What tests must pass before merge?",
+            "How are deployments rolled back?",
+        ],
+    }
+
+
+def build_local_setup_hints(dependency_files: list[dict[str, Any]]) -> list[str]:
+    names = {item["type"] for item in dependency_files}
+    hints = []
+    if "docker-compose.yml" in names:
+        hints.append("Use docker compose up --build for local multi-service startup.")
+    if "requirements.txt" in names:
+        hints.append("Install Python dependencies from requirements.txt in the relevant service folder.")
+    if "package.json" in names:
+        hints.append("Run npm install before frontend or Node-based scripts.")
+    if "pom.xml" in names:
+        hints.append("Use Maven commands such as mvn test for Java modules.")
+    return hints or ["No setup manifest detected; start with README or top-level service folders."]
+
+
 def aggregate_local_analysis(files: list[dict[str, Any]]) -> dict[str, Any]:
     python_files = [item for item in files if item["path"].endswith(".py")]
     analyses = [analyze_code(item["content"], filename=item["path"]) for item in python_files[:60]]
@@ -528,4 +714,8 @@ def extract_repository_intelligence(summary: dict[str, Any]) -> dict[str, Any]:
         "risk_heatmap": summary.get("risk_heatmap", []),
         "architecture_diagram": summary.get("architecture_diagram", {}),
         "sprint_fix_plan": summary.get("sprint_fix_plan", []),
+        "release_gate": summary.get("release_gate", {}),
+        "threat_model": summary.get("threat_model", {}),
+        "prompt_injection_scan": summary.get("prompt_injection_scan", []),
+        "onboarding_guide": summary.get("onboarding_guide", {}),
     }
