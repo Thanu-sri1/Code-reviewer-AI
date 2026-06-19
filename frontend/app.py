@@ -1,10 +1,12 @@
 import ast
+import base64
 import difflib
 import hashlib
 import os
 import time
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 import requests
 import streamlit as st
@@ -72,28 +74,45 @@ def inject_dashboard_styles():
             background: #2563eb;
         }
         .landing-hero-band {
-            border: 1px solid #d7dde7;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.32);
             border-radius: 8px;
-            padding: 34px 34px 24px 34px;
-            background: #f7fafc;
+            padding: 42px 36px 34px 36px;
+            background-color: #0f172a;
+            background-size: cover;
+            background-position: center;
             margin-bottom: 18px;
+            min-height: 360px;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.20);
+        }
+        .landing-hero-band::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, rgba(12, 18, 32, 0.92) 0%, rgba(12, 18, 32, 0.74) 46%, rgba(12, 18, 32, 0.24) 100%);
+        }
+        .landing-hero-content {
+            position: relative;
+            max-width: 760px;
+            z-index: 1;
         }
         .landing-kicker {
-            color: #0f766e;
+            color: #5eead4;
             font-size: 0.82rem;
             font-weight: 800;
             text-transform: uppercase;
             margin-bottom: 8px;
         }
         .landing-title {
-            color: #101827;
-            font-size: 2.45rem;
+            color: #ffffff;
+            font-size: 2.7rem;
             font-weight: 800;
             line-height: 1.08;
             margin-bottom: 10px;
         }
         .landing-subtitle {
-            color: #374151;
+            color: #dbeafe;
             font-size: 1.05rem;
             line-height: 1.55;
             max-width: 920px;
@@ -101,14 +120,15 @@ def inject_dashboard_styles():
         }
         .landing-pill {
             display: inline-block;
-            border: 1px solid #cbd5e1;
+            border: 1px solid rgba(255,255,255,0.30);
             border-radius: 8px;
-            color: #1f2937;
-            background: #ffffff;
+            color: #ecfeff;
+            background: rgba(15, 23, 42, 0.58);
             padding: 6px 12px;
             font-size: 0.82rem;
             font-weight: 650;
             margin: 0 8px 8px 0;
+            backdrop-filter: blur(8px);
         }
         .landing-preview {
             border: 1px solid #d7dde7;
@@ -194,13 +214,14 @@ def inject_dashboard_styles():
             margin: 16px 0 18px 0;
         }
         .signal-item {
-            border: 1px solid #dbe3ef;
+            border: 1px solid #c8d7ee;
             border-radius: 8px;
-            background: #ffffff;
+            background: #eef9ff;
             padding: 14px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
         }
         .signal-item .signal-number {
-            color: #0f766e;
+            color: #2563eb;
             font-size: 1.45rem;
             font-weight: 850;
             margin-bottom: 4px;
@@ -211,10 +232,11 @@ def inject_dashboard_styles():
             line-height: 1.35;
         }
         .story-panel {
-            border: 1px solid #d7dde7;
+            border: 1px solid #cbd5e1;
             border-radius: 8px;
-            background: #ffffff;
+            background: #fff7ed;
             padding: 18px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
         }
         .story-panel h3 {
             color: #111827;
@@ -255,6 +277,15 @@ def inject_dashboard_styles():
 
 
 inject_dashboard_styles()
+
+
+def asset_data_url(relative_path, mime_type="image/png"):
+    path = Path(__file__).resolve().parent / relative_path
+    if not path.exists():
+        return ""
+    encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime_type};base64,{encoded}"
+
 
 def is_valid_python_code(text):
     try:
@@ -1312,19 +1343,23 @@ def show_landing_page():
             if st.button("✨ Register", type="primary", use_container_width=True):
                 go_to_auth("Register")
 
+    hero_image = asset_data_url("assets/release-command-center.png")
     st.markdown(
-        """
-        <div class="landing-hero-band">
-            <div class="landing-kicker">From review comments to release confidence</div>
-            <div class="landing-title">Know if your code can go live.</div>
-            <div class="landing-subtitle">
-                Code Raptor is a release co-pilot for engineering teams. It helps reviewers spot
-                production risk before deployment, understand what could fail, and get a practical
-                fix path without reading a long report.
+        f"""
+        <div class="landing-hero-band" style="background-image: url('{hero_image}');">
+            <div class="landing-hero-content">
+                <div class="landing-kicker">From review comments to release confidence</div>
+                <div class="landing-title">Know if your code can go live.</div>
+                <div class="landing-subtitle">
+                    Code Raptor is a release co-pilot for engineering teams. It helps reviewers spot
+                    production risk before deployment, understand what could fail, and get a practical
+                    fix path without reading a long report.
+                </div>
+                <span class="landing-pill">Decision-first</span>
+                <span class="landing-pill">Production-focused</span>
+                <span class="landing-pill">Fix-oriented</span>
+                <span class="landing-pill">Cloud-aware</span>
             </div>
-            <span class="landing-pill">Decision-first</span>
-            <span class="landing-pill">Production-focused</span>
-            <span class="landing-pill">Fix-oriented</span>
         </div>
         """,
         unsafe_allow_html=True,
