@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: thanusriacr.azurecr.io/frontend:v1
+        image: thanusriacr.azurecr.io/frontend:v2
         imagePullPolicy: Always
         envFrom:
         - configMapRef:

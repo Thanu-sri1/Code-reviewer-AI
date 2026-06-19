@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: ai-service
-        image: thanusriacr.azurecr.io/ai-service:v1
+        image: thanusriacr.azurecr.io/ai-service:v2
         imagePullPolicy: Always
 
         envFrom:

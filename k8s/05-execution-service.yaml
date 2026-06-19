@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: execution-service
-        image: thanusriacr.azurecr.io/execution-service:v1
+        image: thanusriacr.azurecr.io/execution-service:v2
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
