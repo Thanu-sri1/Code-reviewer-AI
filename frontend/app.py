@@ -1178,6 +1178,8 @@ def init_session_state():
         st.session_state["username"] = None
     if "page" not in st.session_state:
         st.session_state["page"] = "Review"
+    if "auth_mode" not in st.session_state:
+        st.session_state["auth_mode"] = "Login"
 
 
 def apply_fixed_code(tab_id, run_after_apply=False):
@@ -1286,11 +1288,29 @@ def show_about_page():
     )
 
 
-def show_auth_page():
+def go_to_auth(mode):
+    st.session_state["auth_mode"] = mode
+    st.session_state["page"] = "Login/Register"
+    st.rerun()
+
+
+def show_landing_page():
     if st.session_state.get("username"):
         st.session_state["page"] = "Review"
         st.rerun()
         return
+
+    nav_left, nav_right = st.columns([3, 1])
+    with nav_left:
+        st.markdown("### Code Raptor")
+    with nav_right:
+        login_col, register_col = st.columns(2)
+        with login_col:
+            if st.button("🔐 Login", use_container_width=True):
+                go_to_auth("Login")
+        with register_col:
+            if st.button("✨ Register", type="primary", use_container_width=True):
+                go_to_auth("Register")
 
     st.markdown(
         """
@@ -1365,8 +1385,60 @@ def show_auth_page():
         )
 
     with right_col:
-        st.subheader("Login / Register")
-        st.caption("Create an account to save review history and run repository analysis.")
+        st.markdown(
+            """
+            <div class="story-panel">
+                <h3>Built for demos and real teams</h3>
+                <p>
+                    Show reviewers a product that thinks beyond syntax: release decisions,
+                    production failure prediction, repo file inspection, and fix generation.
+                </p>
+                <p>
+                    Sign in to open the workspace and start reviewing code or repositories.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def show_auth_page():
+    if st.session_state.get("username"):
+        st.session_state["page"] = "Review"
+        st.rerun()
+        return
+
+    if st.button("Back to Home"):
+        st.session_state["page"] = "Landing"
+        st.rerun()
+
+    st.markdown(
+        """
+        <div class="landing-hero-band">
+            <div class="landing-kicker">Secure workspace access</div>
+            <div class="landing-title">Start your release review.</div>
+            <div class="landing-subtitle">
+                Login to continue your saved reviews, or register to create a new Code Raptor workspace.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    form_left, form_right = st.columns([0.85, 1.15])
+    with form_left:
+        st.markdown(
+            """
+            <div class="story-panel">
+                <h3>After signing in</h3>
+                <p>Review pasted code, scan GitHub repositories, inspect repo files, generate fixes, and save review history.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with form_right:
+        st.caption(f"Selected action: {st.session_state.get('auth_mode', 'Login')}")
         login_tab, register_tab = st.tabs(["Login", "Register"])
 
         with login_tab:
@@ -1809,8 +1881,11 @@ def show_review_page():
 init_session_state()
 
 if not st.session_state.get("username"):
-    st.session_state["page"] = "Login/Register"
-    show_auth_page()
+    if st.session_state.get("page") == "Login/Register":
+        show_auth_page()
+    else:
+        st.session_state["page"] = "Landing"
+        show_landing_page()
 else:
     show_sidebar()
 
