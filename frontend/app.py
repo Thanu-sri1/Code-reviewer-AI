@@ -115,6 +115,13 @@ def inject_dashboard_styles():
             line-height: 1.08;
             margin-bottom: 10px;
         }
+        .landing-product-name {
+            color: #ffffff;
+            font-size: 1.25rem;
+            font-weight: 950;
+            letter-spacing: 0;
+            margin-bottom: 10px;
+        }
         .landing-subtitle {
             color: #dbeafe;
             font-size: 1.05rem;
@@ -1403,7 +1410,8 @@ def show_landing_page():
             <div class="landing-hero-grid">
                 <div>
                     <div class="landing-kicker">AI release confidence for real deployments</div>
-                    <div class="landing-title">Review code like production depends on it.</div>
+                    <div class="landing-product-name">Code Raptor</div>
+                    <div class="landing-title">Catch release risks before they catch your users.</div>
                     <div class="landing-subtitle">
                         Code Raptor finds release blockers, risky repository files, weak deployment
                         configuration, and practical fixes before your code reaches users.
