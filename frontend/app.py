@@ -73,29 +73,33 @@ def inject_dashboard_styles():
             color: white;
             background: #2563eb;
         }
+        .landing-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 2px 0 18px 0;
+        }
+        .landing-brand {
+            color: #0f172a;
+            font-size: 1.35rem;
+            font-weight: 900;
+        }
         .landing-hero-band {
-            position: relative;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.32);
+            border: 1px solid #bed7ff;
             border-radius: 8px;
-            padding: 42px 36px 34px 36px;
-            background-color: #0f172a;
-            background-size: cover;
-            background-position: center;
+            padding: 34px;
+            background:
+                radial-gradient(circle at 10% 20%, rgba(45, 212, 191, 0.22), transparent 28%),
+                radial-gradient(circle at 78% 12%, rgba(249, 115, 22, 0.18), transparent 28%),
+                linear-gradient(135deg, #08111f 0%, #10294a 48%, #0f766e 100%);
             margin-bottom: 18px;
-            min-height: 360px;
-            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.20);
+            box-shadow: 0 20px 46px rgba(15, 23, 42, 0.20);
         }
-        .landing-hero-band::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(90deg, rgba(12, 18, 32, 0.92) 0%, rgba(12, 18, 32, 0.74) 46%, rgba(12, 18, 32, 0.24) 100%);
-        }
-        .landing-hero-content {
-            position: relative;
-            max-width: 760px;
-            z-index: 1;
+        .landing-hero-grid {
+            display: grid;
+            grid-template-columns: 1.02fr 0.98fr;
+            gap: 26px;
+            align-items: center;
         }
         .landing-kicker {
             color: #5eead4;
@@ -115,7 +119,6 @@ def inject_dashboard_styles():
             color: #dbeafe;
             font-size: 1.05rem;
             line-height: 1.55;
-            max-width: 920px;
             margin-bottom: 20px;
         }
         .landing-pill {
@@ -129,6 +132,50 @@ def inject_dashboard_styles():
             font-weight: 650;
             margin: 0 8px 8px 0;
             backdrop-filter: blur(8px);
+        }
+        .hero-actions {
+            margin-top: 14px;
+        }
+        .hero-note {
+            color: #bae6fd;
+            font-size: 0.86rem;
+            margin-top: 10px;
+        }
+        .landing-visual {
+            border: 1px solid rgba(255,255,255,0.30);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.10);
+            padding: 10px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.28);
+        }
+        .landing-visual img {
+            display: block;
+            width: 100%;
+            border-radius: 6px;
+        }
+        .landing-proof {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 18px;
+        }
+        .proof-card {
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 16px;
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+        }
+        .proof-card .proof-title {
+            color: #0f172a;
+            font-size: 1rem;
+            font-weight: 850;
+            margin-bottom: 6px;
+        }
+        .proof-card .proof-copy {
+            color: #475569;
+            font-size: 0.9rem;
+            line-height: 1.45;
         }
         .landing-preview {
             border: 1px solid #d7dde7;
@@ -263,7 +310,13 @@ def inject_dashboard_styles():
             .preview-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
+            .landing-hero-grid {
+                grid-template-columns: 1fr;
+            }
             .signal-strip {
+                grid-template-columns: 1fr;
+            }
+            .landing-proof {
                 grid-template-columns: 1fr;
             }
             .landing-title {
@@ -1333,32 +1386,37 @@ def show_landing_page():
 
     nav_left, nav_right = st.columns([3, 1])
     with nav_left:
-        st.markdown("### Code Raptor")
+        st.markdown('<div class="landing-brand">Code Raptor</div>', unsafe_allow_html=True)
     with nav_right:
         login_col, register_col = st.columns(2)
         with login_col:
-            if st.button("🔐 Login", use_container_width=True):
+            if st.button("Login", use_container_width=True):
                 go_to_auth("Login")
         with register_col:
-            if st.button("✨ Register", type="primary", use_container_width=True):
+            if st.button("Register", type="primary", use_container_width=True):
                 go_to_auth("Register")
 
     hero_image = asset_data_url("assets/release-command-center.png")
     st.markdown(
         f"""
-        <div class="landing-hero-band" style="background-image: url('{hero_image}');">
-            <div class="landing-hero-content">
-                <div class="landing-kicker">From review comments to release confidence</div>
-                <div class="landing-title">Know if your code can go live.</div>
-                <div class="landing-subtitle">
-                    Code Raptor is a release co-pilot for engineering teams. It helps reviewers spot
-                    production risk before deployment, understand what could fail, and get a practical
-                    fix path without reading a long report.
+        <div class="landing-hero-band">
+            <div class="landing-hero-grid">
+                <div>
+                    <div class="landing-kicker">AI release confidence for real deployments</div>
+                    <div class="landing-title">Review code like production depends on it.</div>
+                    <div class="landing-subtitle">
+                        Code Raptor finds release blockers, risky repository files, weak deployment
+                        configuration, and practical fixes before your code reaches users.
+                    </div>
+                    <span class="landing-pill">Repository review</span>
+                    <span class="landing-pill">Pipeline safety</span>
+                    <span class="landing-pill">AKS readiness</span>
+                    <span class="landing-pill">Correct fix snippets</span>
+                    <div class="hero-note">Built for reviewers who need a decision, not another long report.</div>
                 </div>
-                <span class="landing-pill">Decision-first</span>
-                <span class="landing-pill">Production-focused</span>
-                <span class="landing-pill">Fix-oriented</span>
-                <span class="landing-pill">Cloud-aware</span>
+                <div class="landing-visual">
+                    <img src="{hero_image}" alt="AI release command center visual">
+                </div>
             </div>
         </div>
         """,
@@ -1367,74 +1425,23 @@ def show_landing_page():
 
     st.markdown(
         """
-        <div class="signal-strip">
-            <div class="signal-item">
-                <div class="signal-number">01</div>
-                <div class="signal-label">Find the release risk hidden behind passing builds.</div>
+        <div class="landing-proof">
+            <div class="proof-card">
+                <div class="proof-title">Release decision first</div>
+                <div class="proof-copy">See whether a repository is approved, warning-level, or blocked before reading details.</div>
             </div>
-            <div class="signal-item">
-                <div class="signal-number">02</div>
-                <div class="signal-label">Turn technical findings into simple reviewer decisions.</div>
+            <div class="proof-card">
+                <div class="proof-title">Issues mapped to files</div>
+                <div class="proof-copy">Open the exact repo file, compare the issue, and understand where the fix belongs.</div>
             </div>
-            <div class="signal-item">
-                <div class="signal-number">03</div>
-                <div class="signal-label">Guide developers to the exact file and correction.</div>
+            <div class="proof-card">
+                <div class="proof-title">Fixes you can use</div>
+                <div class="proof-copy">Generate corrected code, YAML, Dockerfile, or pipeline snippets instead of vague advice.</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    left_col, right_col = st.columns([1.05, 0.95])
-
-    with left_col:
-        st.markdown(
-            """
-            <div class="story-panel">
-                <h3>Why this is different</h3>
-                <p>
-                    Most tools tell you what is wrong in code. Code Raptor focuses on what matters
-                    before release: whether the change is safe, what can break in production, and
-                    what the developer should fix next.
-                </p>
-                <p>
-                    The landing page keeps it simple. After login, the full workspace opens for code,
-                    repository, pipeline, and file-level review.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("")
-        st.markdown(
-            """
-            <div class="story-panel">
-                <h3>Reviewer promise</h3>
-                <p>
-                    A reviewer should understand the release risk in seconds, not scroll through
-                    pages of generic AI text.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with right_col:
-        st.markdown(
-            """
-            <div class="story-panel">
-                <h3>Built for demos and real teams</h3>
-                <p>
-                    Show reviewers a product that thinks beyond syntax: release decisions,
-                    production failure prediction, repo file inspection, and fix generation.
-                </p>
-                <p>
-                    Sign in to open the workspace and start reviewing code or repositories.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
 
 def show_auth_page():
