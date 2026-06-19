@@ -71,48 +71,114 @@ def inject_dashboard_styles():
             color: white;
             background: #2563eb;
         }
-        .landing-hero {
-            border: 1px solid #d1d5db;
+        .landing-hero-band {
+            border: 1px solid #d7dde7;
             border-radius: 8px;
-            padding: 28px 30px;
-            background: #f8fafc;
-            margin-bottom: 20px;
+            padding: 34px 34px 24px 34px;
+            background: #f7fafc;
+            margin-bottom: 18px;
+        }
+        .landing-kicker {
+            color: #0f766e;
+            font-size: 0.82rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            margin-bottom: 8px;
         }
         .landing-title {
-            color: #111827;
-            font-size: 2.2rem;
+            color: #101827;
+            font-size: 2.45rem;
             font-weight: 800;
-            line-height: 1.12;
+            line-height: 1.08;
             margin-bottom: 10px;
         }
         .landing-subtitle {
             color: #374151;
             font-size: 1.05rem;
             line-height: 1.55;
-            max-width: 860px;
-            margin-bottom: 18px;
+            max-width: 920px;
+            margin-bottom: 20px;
         }
         .landing-pill {
             display: inline-block;
             border: 1px solid #cbd5e1;
-            border-radius: 999px;
+            border-radius: 8px;
             color: #1f2937;
             background: #ffffff;
-            padding: 5px 12px;
+            padding: 6px 12px;
             font-size: 0.82rem;
             font-weight: 650;
             margin: 0 8px 8px 0;
         }
+        .landing-preview {
+            border: 1px solid #d7dde7;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 18px;
+            margin: 4px 0 18px 0;
+        }
+        .preview-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 12px;
+            margin-bottom: 14px;
+        }
+        .preview-title {
+            color: #111827;
+            font-weight: 800;
+            font-size: 1rem;
+        }
+        .decision-badge {
+            display: inline-block;
+            color: #ffffff;
+            background: #dc2626;
+            border-radius: 8px;
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .preview-metric {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fbfdff;
+        }
+        .preview-metric .metric-label {
+            color: #64748b;
+            font-size: 0.76rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        .preview-metric .metric-value {
+            color: #111827;
+            font-size: 1.35rem;
+            font-weight: 850;
+        }
+        .preview-alert {
+            border-left: 4px solid #dc2626;
+            background: #fff7ed;
+            padding: 10px 12px;
+            margin-top: 12px;
+            color: #374151;
+            font-size: 0.9rem;
+        }
         .landing-card {
             border: 1px solid #e5e7eb;
             border-radius: 8px;
-            padding: 16px;
+            padding: 18px;
             background: #ffffff;
-            min-height: 138px;
+            min-height: 150px;
         }
         .landing-card h3 {
             color: #111827;
-            font-size: 1rem;
+            font-size: 1.02rem;
             margin: 0 0 8px 0;
         }
         .landing-card p {
@@ -122,12 +188,22 @@ def inject_dashboard_styles():
             margin: 0;
         }
         .landing-step {
-            border-left: 3px solid #2563eb;
-            padding: 8px 0 8px 12px;
+            border: 1px solid #e5e7eb;
+            border-left: 4px solid #2563eb;
+            border-radius: 8px;
+            padding: 10px 12px;
             color: #374151;
             font-size: 0.92rem;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
             background: #ffffff;
+        }
+        @media (max-width: 900px) {
+            .preview-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .landing-title {
+                font-size: 1.8rem;
+            }
         }
         </style>
         """,
@@ -1175,29 +1251,67 @@ def show_auth_page():
 
     st.markdown(
         """
-        <div class="landing-hero">
+        <div class="landing-hero-band">
+            <div class="landing-kicker">AI Release Readiness Platform</div>
             <div class="landing-title">Code Raptor</div>
             <div class="landing-subtitle">
-                AI release-readiness platform for code, repositories, pipelines, Dockerfiles,
-                and Kubernetes manifests. Review source code, predict deployment risk,
-                find cost waste, and generate practical fixes before production.
+                Move beyond basic code comments. Code Raptor scans source code, GitHub repositories,
+                CI/CD pipelines, Dockerfiles, and Kubernetes manifests to tell your team whether a
+                release is ready, blocked, risky, or wasting cloud cost.
             </div>
             <span class="landing-pill">Azure AI Foundry</span>
-            <span class="landing-pill">GitHub Repository Review</span>
-            <span class="landing-pill">AKS Deployment Checks</span>
-            <span class="landing-pill">Fix Suggestions</span>
+            <span class="landing-pill">Repository File Viewer</span>
+            <span class="landing-pill">Risk Heatmap</span>
+            <span class="landing-pill">Correct Fix Generator</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    feature_cols = st.columns(4)
+    st.markdown(
+        """
+        <div class="landing-preview">
+            <div class="preview-bar">
+                <div class="preview-title">Release dashboard preview</div>
+                <div class="decision-badge">BLOCKED</div>
+            </div>
+            <div class="preview-grid">
+                <div class="preview-metric">
+                    <div class="metric-label">Readiness</div>
+                    <div class="metric-value">72/100</div>
+                </div>
+                <div class="preview-metric">
+                    <div class="metric-label">Security</div>
+                    <div class="metric-value">80</div>
+                </div>
+                <div class="preview-metric">
+                    <div class="metric-label">Deployment</div>
+                    <div class="metric-value">65</div>
+                </div>
+                <div class="preview-metric">
+                    <div class="metric-label">Cost</div>
+                    <div class="metric-value">60</div>
+                </div>
+                <div class="preview-metric">
+                    <div class="metric-label">Fixes</div>
+                    <div class="metric-value">4</div>
+                </div>
+            </div>
+            <div class="preview-alert">
+                Blocker found: rollback stage missing. Suggested fix: add an AKS rollback step to the pipeline.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    feature_cols = st.columns(3)
     with feature_cols[0]:
         st.markdown(
             """
             <div class="landing-card">
-                <h3>Code Review</h3>
-                <p>Review Python, JavaScript, TypeScript, Java, YAML, JSON, and pasted code with clear issues and fixes.</p>
+                <h3>Review the whole repo</h3>
+                <p>Paste code or submit a GitHub URL. The app scans supported files, ignores vendor folders, and maps issues back to files.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1206,8 +1320,8 @@ def show_auth_page():
         st.markdown(
             """
             <div class="landing-card">
-                <h3>Repository Intelligence</h3>
-                <p>Scan GitHub repositories, inspect files, map issues to code, and generate corrected file versions.</p>
+                <h3>Predict release failures</h3>
+                <p>Catch missing readiness probes, rollback stages, Docker hardening, oversized AKS resources, and risky pipelines.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1216,18 +1330,8 @@ def show_auth_page():
         st.markdown(
             """
             <div class="landing-card">
-                <h3>Release Readiness</h3>
-                <p>Score security, performance, deployment, cost, and maintainability with a simple release decision.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with feature_cols[3]:
-        st.markdown(
-            """
-            <div class="landing-card">
-                <h3>DevOps Risk</h3>
-                <p>Detect missing rollback, readiness probes, resource limits, artifact publishing, and pipeline controls.</p>
+                <h3>Generate correct fixes</h3>
+                <p>Open repo files in the interface, compare issues with code, and generate corrected syntax or configuration snippets.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1237,22 +1341,22 @@ def show_auth_page():
     left_col, right_col = st.columns([1.08, 0.92])
 
     with left_col:
-        st.subheader("How It Helps")
+        st.subheader("Built For Release Decisions")
         st.markdown(
             """
-            <div class="landing-step"><b>1. Submit code or a GitHub repository.</b> The scanner reads supported files and ignores generated/vendor content.</div>
-            <div class="landing-step"><b>2. Get a release decision.</b> See whether the project is approved, warning-level, or blocked.</div>
-            <div class="landing-step"><b>3. Fix with context.</b> Open the affected file, compare the issue, and generate corrected syntax or config snippets.</div>
+            <div class="landing-step"><b>1. See the decision fast.</b> Approved, warning, or blocked with release-readiness scores.</div>
+            <div class="landing-step"><b>2. Inspect the exact file.</b> View repository files beside mapped issues and suggested fixes.</div>
+            <div class="landing-step"><b>3. Apply a fix confidently.</b> Generate corrected code, YAML, Dockerfile, or pipeline syntax.</div>
             """,
             unsafe_allow_html=True,
         )
-        st.subheader("Dashboard Output")
+        st.subheader("What Reviewers Can See")
         st.table(
             [
-                {"Signal": "Release Decision", "Example": "BLOCKED when rollback or readiness checks are missing"},
-                {"Signal": "Risk Heatmap", "Example": "High-risk files ranked by score and reason"},
-                {"Signal": "Fix Now", "Example": "Exact YAML, Dockerfile, pipeline, or code fix snippets"},
-                {"Signal": "Cost Leakage", "Example": "Oversized AKS requests with estimated savings"},
+                {"Area": "Release Decision", "Result": "Clear blocked/warning/approved status"},
+                {"Area": "Risk Heatmap", "Result": "Files ranked by severity and reason"},
+                {"Area": "Fix Now", "Result": "Issue, impact, suggestion, and fixed snippet"},
+                {"Area": "Cost Leakage", "Result": "AKS resource waste and right-size recommendation"},
             ]
         )
 
