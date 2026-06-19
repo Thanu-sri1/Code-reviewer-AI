@@ -3,9 +3,8 @@ kind: Ingress
 metadata:
   name: codereviewer-ingress
   namespace: codereviewer
-  annotations:
-    kubernetes.io/ingress.class: azure/application-gateway
 spec:
+  ingressClassName: azure-application-gateway
   rules:
   - http:
       paths:
