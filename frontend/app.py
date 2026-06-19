@@ -187,6 +187,46 @@ def inject_dashboard_styles():
             line-height: 1.45;
             margin: 0;
         }
+        .signal-strip {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 16px 0 18px 0;
+        }
+        .signal-item {
+            border: 1px solid #dbe3ef;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 14px;
+        }
+        .signal-item .signal-number {
+            color: #0f766e;
+            font-size: 1.45rem;
+            font-weight: 850;
+            margin-bottom: 4px;
+        }
+        .signal-item .signal-label {
+            color: #475569;
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+        .story-panel {
+            border: 1px solid #d7dde7;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 18px;
+        }
+        .story-panel h3 {
+            color: #111827;
+            margin: 0 0 10px 0;
+            font-size: 1.05rem;
+        }
+        .story-panel p {
+            color: #4b5563;
+            margin: 0 0 10px 0;
+            line-height: 1.5;
+            font-size: 0.92rem;
+        }
         .landing-step {
             border: 1px solid #e5e7eb;
             border-left: 4px solid #2563eb;
@@ -200,6 +240,9 @@ def inject_dashboard_styles():
         @media (max-width: 900px) {
             .preview-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .signal-strip {
+                grid-template-columns: 1fr;
             }
             .landing-title {
                 font-size: 1.8rem;
@@ -1252,17 +1295,16 @@ def show_auth_page():
     st.markdown(
         """
         <div class="landing-hero-band">
-            <div class="landing-kicker">AI Release Readiness Platform</div>
-            <div class="landing-title">Code Raptor</div>
+            <div class="landing-kicker">From review comments to release confidence</div>
+            <div class="landing-title">Know if your code can go live.</div>
             <div class="landing-subtitle">
-                Move beyond basic code comments. Code Raptor scans source code, GitHub repositories,
-                CI/CD pipelines, Dockerfiles, and Kubernetes manifests to tell your team whether a
-                release is ready, blocked, risky, or wasting cloud cost.
+                Code Raptor is a release co-pilot for engineering teams. It helps reviewers spot
+                production risk before deployment, understand what could fail, and get a practical
+                fix path without reading a long report.
             </div>
-            <span class="landing-pill">Azure AI Foundry</span>
-            <span class="landing-pill">Repository File Viewer</span>
-            <span class="landing-pill">Risk Heatmap</span>
-            <span class="landing-pill">Correct Fix Generator</span>
+            <span class="landing-pill">Decision-first</span>
+            <span class="landing-pill">Production-focused</span>
+            <span class="landing-pill">Fix-oriented</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1270,94 +1312,56 @@ def show_auth_page():
 
     st.markdown(
         """
-        <div class="landing-preview">
-            <div class="preview-bar">
-                <div class="preview-title">Release dashboard preview</div>
-                <div class="decision-badge">BLOCKED</div>
+        <div class="signal-strip">
+            <div class="signal-item">
+                <div class="signal-number">01</div>
+                <div class="signal-label">Find the release risk hidden behind passing builds.</div>
             </div>
-            <div class="preview-grid">
-                <div class="preview-metric">
-                    <div class="metric-label">Readiness</div>
-                    <div class="metric-value">72/100</div>
-                </div>
-                <div class="preview-metric">
-                    <div class="metric-label">Security</div>
-                    <div class="metric-value">80</div>
-                </div>
-                <div class="preview-metric">
-                    <div class="metric-label">Deployment</div>
-                    <div class="metric-value">65</div>
-                </div>
-                <div class="preview-metric">
-                    <div class="metric-label">Cost</div>
-                    <div class="metric-value">60</div>
-                </div>
-                <div class="preview-metric">
-                    <div class="metric-label">Fixes</div>
-                    <div class="metric-value">4</div>
-                </div>
+            <div class="signal-item">
+                <div class="signal-number">02</div>
+                <div class="signal-label">Turn technical findings into simple reviewer decisions.</div>
             </div>
-            <div class="preview-alert">
-                Blocker found: rollback stage missing. Suggested fix: add an AKS rollback step to the pipeline.
+            <div class="signal-item">
+                <div class="signal-number">03</div>
+                <div class="signal-label">Guide developers to the exact file and correction.</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    feature_cols = st.columns(3)
-    with feature_cols[0]:
-        st.markdown(
-            """
-            <div class="landing-card">
-                <h3>Review the whole repo</h3>
-                <p>Paste code or submit a GitHub URL. The app scans supported files, ignores vendor folders, and maps issues back to files.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with feature_cols[1]:
-        st.markdown(
-            """
-            <div class="landing-card">
-                <h3>Predict release failures</h3>
-                <p>Catch missing readiness probes, rollback stages, Docker hardening, oversized AKS resources, and risky pipelines.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with feature_cols[2]:
-        st.markdown(
-            """
-            <div class="landing-card">
-                <h3>Generate correct fixes</h3>
-                <p>Open repo files in the interface, compare issues with code, and generate corrected syntax or configuration snippets.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.write("")
-    left_col, right_col = st.columns([1.08, 0.92])
+    left_col, right_col = st.columns([1.05, 0.95])
 
     with left_col:
-        st.subheader("Built For Release Decisions")
         st.markdown(
             """
-            <div class="landing-step"><b>1. See the decision fast.</b> Approved, warning, or blocked with release-readiness scores.</div>
-            <div class="landing-step"><b>2. Inspect the exact file.</b> View repository files beside mapped issues and suggested fixes.</div>
-            <div class="landing-step"><b>3. Apply a fix confidently.</b> Generate corrected code, YAML, Dockerfile, or pipeline syntax.</div>
+            <div class="story-panel">
+                <h3>Why this is different</h3>
+                <p>
+                    Most tools tell you what is wrong in code. Code Raptor focuses on what matters
+                    before release: whether the change is safe, what can break in production, and
+                    what the developer should fix next.
+                </p>
+                <p>
+                    The landing page keeps it simple. After login, the full workspace opens for code,
+                    repository, pipeline, and file-level review.
+                </p>
+            </div>
             """,
             unsafe_allow_html=True,
         )
-        st.subheader("What Reviewers Can See")
-        st.table(
-            [
-                {"Area": "Release Decision", "Result": "Clear blocked/warning/approved status"},
-                {"Area": "Risk Heatmap", "Result": "Files ranked by severity and reason"},
-                {"Area": "Fix Now", "Result": "Issue, impact, suggestion, and fixed snippet"},
-                {"Area": "Cost Leakage", "Result": "AKS resource waste and right-size recommendation"},
-            ]
+        st.write("")
+        st.markdown(
+            """
+            <div class="story-panel">
+                <h3>Reviewer promise</h3>
+                <p>
+                    A reviewer should understand the release risk in seconds, not scroll through
+                    pages of generic AI text.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     with right_col:
