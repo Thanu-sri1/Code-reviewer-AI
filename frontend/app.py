@@ -71,6 +71,64 @@ def inject_dashboard_styles():
             color: white;
             background: #2563eb;
         }
+        .landing-hero {
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 28px 30px;
+            background: #f8fafc;
+            margin-bottom: 20px;
+        }
+        .landing-title {
+            color: #111827;
+            font-size: 2.2rem;
+            font-weight: 800;
+            line-height: 1.12;
+            margin-bottom: 10px;
+        }
+        .landing-subtitle {
+            color: #374151;
+            font-size: 1.05rem;
+            line-height: 1.55;
+            max-width: 860px;
+            margin-bottom: 18px;
+        }
+        .landing-pill {
+            display: inline-block;
+            border: 1px solid #cbd5e1;
+            border-radius: 999px;
+            color: #1f2937;
+            background: #ffffff;
+            padding: 5px 12px;
+            font-size: 0.82rem;
+            font-weight: 650;
+            margin: 0 8px 8px 0;
+        }
+        .landing-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            background: #ffffff;
+            min-height: 138px;
+        }
+        .landing-card h3 {
+            color: #111827;
+            font-size: 1rem;
+            margin: 0 0 8px 0;
+        }
+        .landing-card p {
+            color: #4b5563;
+            font-size: 0.9rem;
+            line-height: 1.45;
+            margin: 0;
+        }
+        .landing-step {
+            border-left: 3px solid #2563eb;
+            padding: 8px 0 8px 12px;
+            color: #374151;
+            font-size: 0.92rem;
+            margin-bottom: 8px;
+            background: #ffffff;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1110,57 +1168,134 @@ def show_about_page():
 
 
 def show_auth_page():
-    st.markdown(
-        """
-        <h1 style="text-align:center; margin-top: 0;">Code Raptor</h1>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.title("Login / Register")
-    st.info("Login or create an account to access code review, file upload, and code execution.")
-
     if st.session_state.get("username"):
         st.session_state["page"] = "Review"
         st.rerun()
         return
 
-    login_tab, register_tab = st.tabs(["Login", "Register"])
+    st.markdown(
+        """
+        <div class="landing-hero">
+            <div class="landing-title">Code Raptor</div>
+            <div class="landing-subtitle">
+                AI release-readiness platform for code, repositories, pipelines, Dockerfiles,
+                and Kubernetes manifests. Review source code, predict deployment risk,
+                find cost waste, and generate practical fixes before production.
+            </div>
+            <span class="landing-pill">Azure AI Foundry</span>
+            <span class="landing-pill">GitHub Repository Review</span>
+            <span class="landing-pill">AKS Deployment Checks</span>
+            <span class="landing-pill">Fix Suggestions</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with login_tab:
-        email = st.text_input("Email", key="login_email")
-        show_login_password = st.checkbox("Show password", key="show_login_password")
-        password = st.text_input(
-            "Password",
-            type="default" if show_login_password else "password",
-            key="login_password",
+    feature_cols = st.columns(4)
+    with feature_cols[0]:
+        st.markdown(
+            """
+            <div class="landing-card">
+                <h3>Code Review</h3>
+                <p>Review Python, JavaScript, TypeScript, Java, YAML, JSON, and pasted code with clear issues and fixes.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        if st.button("Login", type="primary"):
-            login_data = authenticate(email, password)
-            if login_data:
-                username = login_data.get("username", email)
-                st.session_state["username"] = username
-                st.session_state["tabs"] = load_user_reviews(username)
-                if not st.session_state["tabs"]:
-                    create_new_tab()
-                st.session_state["page"] = "Review"
-                st.rerun()
-            else:
-                st.error("Invalid email or password")
+    with feature_cols[1]:
+        st.markdown(
+            """
+            <div class="landing-card">
+                <h3>Repository Intelligence</h3>
+                <p>Scan GitHub repositories, inspect files, map issues to code, and generate corrected file versions.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with feature_cols[2]:
+        st.markdown(
+            """
+            <div class="landing-card">
+                <h3>Release Readiness</h3>
+                <p>Score security, performance, deployment, cost, and maintainability with a simple release decision.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with feature_cols[3]:
+        st.markdown(
+            """
+            <div class="landing-card">
+                <h3>DevOps Risk</h3>
+                <p>Detect missing rollback, readiness probes, resource limits, artifact publishing, and pipeline controls.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    with register_tab:
-        new_username = st.text_input("Username", key="reg_username")
-        new_email = st.text_input("Email", key="reg_email")
-        show_register_password = st.checkbox("Show password", key="show_register_password")
-        password_type = "default" if show_register_password else "password"
-        new_password = st.text_input("Password", type=password_type, key="reg_password")
-        confirm_password = st.text_input("Confirm Password", type=password_type, key="reg_confirm_password")
-        if st.button("Register", type="primary"):
-            if new_password != confirm_password:
-                st.error("Password and confirm password do not match.")
-            elif register_user(new_username, new_email, new_password):
-                st.success("Registration successful. Please login.")
-            else:
-                st.error("Username or email already exists, or input is invalid.")
+    st.write("")
+    left_col, right_col = st.columns([1.08, 0.92])
+
+    with left_col:
+        st.subheader("How It Helps")
+        st.markdown(
+            """
+            <div class="landing-step"><b>1. Submit code or a GitHub repository.</b> The scanner reads supported files and ignores generated/vendor content.</div>
+            <div class="landing-step"><b>2. Get a release decision.</b> See whether the project is approved, warning-level, or blocked.</div>
+            <div class="landing-step"><b>3. Fix with context.</b> Open the affected file, compare the issue, and generate corrected syntax or config snippets.</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.subheader("Dashboard Output")
+        st.table(
+            [
+                {"Signal": "Release Decision", "Example": "BLOCKED when rollback or readiness checks are missing"},
+                {"Signal": "Risk Heatmap", "Example": "High-risk files ranked by score and reason"},
+                {"Signal": "Fix Now", "Example": "Exact YAML, Dockerfile, pipeline, or code fix snippets"},
+                {"Signal": "Cost Leakage", "Example": "Oversized AKS requests with estimated savings"},
+            ]
+        )
+
+    with right_col:
+        st.subheader("Login / Register")
+        st.caption("Create an account to save review history and run repository analysis.")
+        login_tab, register_tab = st.tabs(["Login", "Register"])
+
+        with login_tab:
+            email = st.text_input("Email", key="login_email")
+            show_login_password = st.checkbox("Show password", key="show_login_password")
+            password = st.text_input(
+                "Password",
+                type="default" if show_login_password else "password",
+                key="login_password",
+            )
+            if st.button("Login", type="primary", use_container_width=True):
+                login_data = authenticate(email, password)
+                if login_data:
+                    username = login_data.get("username", email)
+                    st.session_state["username"] = username
+                    st.session_state["tabs"] = load_user_reviews(username)
+                    if not st.session_state["tabs"]:
+                        create_new_tab()
+                    st.session_state["page"] = "Review"
+                    st.rerun()
+                else:
+                    st.error("Invalid email or password")
+
+        with register_tab:
+            new_username = st.text_input("Username", key="reg_username")
+            new_email = st.text_input("Email", key="reg_email")
+            show_register_password = st.checkbox("Show password", key="show_register_password")
+            password_type = "default" if show_register_password else "password"
+            new_password = st.text_input("Password", type=password_type, key="reg_password")
+            confirm_password = st.text_input("Confirm Password", type=password_type, key="reg_confirm_password")
+            if st.button("Register", type="primary", use_container_width=True):
+                if new_password != confirm_password:
+                    st.error("Password and confirm password do not match.")
+                elif register_user(new_username, new_email, new_password):
+                    st.success("Registration successful. Please login.")
+                else:
+                    st.error("Username or email already exists, or input is invalid.")
 
 
 def get_current_tab_data():
