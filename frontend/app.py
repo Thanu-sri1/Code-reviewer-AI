@@ -101,6 +101,9 @@ def inject_dashboard_styles():
             gap: 26px;
             align-items: center;
         }
+        .landing-copy {
+            text-align: center;
+        }
         .landing-kicker {
             color: #5eead4;
             font-size: 0.82rem;
@@ -117,10 +120,10 @@ def inject_dashboard_styles():
         }
         .landing-product-name {
             color: #ffffff;
-            font-size: 1.25rem;
+            font-size: 2.05rem;
             font-weight: 950;
             letter-spacing: 0;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         .landing-subtitle {
             color: #dbeafe;
@@ -165,6 +168,38 @@ def inject_dashboard_styles():
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 14px;
             margin-top: 18px;
+        }
+        .benefit-band {
+            border: 1px solid #c7d2fe;
+            border-radius: 8px;
+            background: #eef2ff;
+            padding: 20px;
+            margin-top: 18px;
+        }
+        .benefit-title {
+            color: #111827;
+            font-size: 1.2rem;
+            font-weight: 850;
+            margin-bottom: 12px;
+        }
+        .benefit-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .benefit-item {
+            border: 1px solid #dbe3ff;
+            border-radius: 8px;
+            background: #ffffff;
+            padding: 13px;
+            color: #475569;
+            font-size: 0.88rem;
+            line-height: 1.4;
+        }
+        .benefit-item b {
+            display: block;
+            color: #1e293b;
+            margin-bottom: 5px;
         }
         .proof-card {
             border: 1px solid #cbd5e1;
@@ -324,6 +359,9 @@ def inject_dashboard_styles():
                 grid-template-columns: 1fr;
             }
             .landing-proof {
+                grid-template-columns: 1fr;
+            }
+            .benefit-grid {
                 grid-template-columns: 1fr;
             }
             .landing-title {
@@ -1408,7 +1446,7 @@ def show_landing_page():
         f"""
         <div class="landing-hero-band">
             <div class="landing-hero-grid">
-                <div>
+                <div class="landing-copy">
                     <div class="landing-kicker">AI release confidence for real deployments</div>
                     <div class="landing-product-name">Code Raptor</div>
                     <div class="landing-title">Catch release risks before they catch your users.</div>
@@ -1424,6 +1462,33 @@ def show_landing_page():
                 </div>
                 <div class="landing-visual">
                     <img src="{hero_image}" alt="AI release command center visual">
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="benefit-band">
+            <div class="benefit-title">What users gain from Code Raptor</div>
+            <div class="benefit-grid">
+                <div class="benefit-item">
+                    <b>Faster reviews</b>
+                    Understand release risk without reading every file manually.
+                </div>
+                <div class="benefit-item">
+                    <b>Better fixes</b>
+                    Move from vague suggestions to corrected code, YAML, and pipeline snippets.
+                </div>
+                <div class="benefit-item">
+                    <b>Safer deployments</b>
+                    Catch missing rollback, health checks, risky Dockerfiles, and weak Kubernetes config.
+                </div>
+                <div class="benefit-item">
+                    <b>Cloud awareness</b>
+                    Spot resource waste and cost-heavy AKS settings before they reach production.
                 </div>
             </div>
         </div>
