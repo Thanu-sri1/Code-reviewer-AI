@@ -3,12 +3,17 @@ kind: Ingress
 metadata:
   name: codereviewer-ingress
   namespace: codereviewer
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: "http"
+    appgw.ingress.kubernetes.io/health-probe-path: "/_stcore/health"
+    appgw.ingress.kubernetes.io/health-probe-port: "8501"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399"
+    appgw.ingress.kubernetes.io/request-timeout: "60"
 spec:
   ingressClassName: azure-application-gateway
   rules:
   - http:
       paths:
-
       - path: /
         pathType: Prefix
         backend:
@@ -16,35 +21,3 @@ spec:
             name: frontend-service
             port:
               number: 8501
-
-      - path: /auth
-        pathType: Prefix
-        backend:
-          service:
-            name: auth-service
-            port:
-              number: 8001
-
-      - path: /ai
-        pathType: Prefix
-        backend:
-          service:
-            name: ai-service
-            port:
-              number: 8003
-
-      - path: /review
-        pathType: Prefix
-        backend:
-          service:
-            name: review-service
-            port:
-              number: 8004
-
-      - path: /execute
-        pathType: Prefix
-        backend:
-          service:
-            name: execution-service
-            port:
-              number: 8002
