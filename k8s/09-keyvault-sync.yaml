@@ -4,7 +4,7 @@ metadata:
   name: keyvault-secret-sync
   namespace: codereviewer
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
     type: Recreate
   selector:
