@@ -1,0 +1,37 @@
+{{- range .Values.namespaces }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Values.services.review.name }}
+  namespace: {{ . }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.services.review.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.services.review.name }}
+    spec:
+      containers:
+      - name: {{ $.Values.services.review.name }}
+        image: {{ $.Values.image.registry }}/{{ $.Values.services.review.image }}:{{ $.Values.image.tag }}
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: {{ $.Values.configMap.name }}
+        - secretRef:
+            name: {{ $.Values.secret.name }}
+            optional: true
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secret.name }}
+              key: DATABASE_URL
+              optional: true
+        ports:
+        - containerPort: {{ $.Values.services.review.port }}
+{{- end }}

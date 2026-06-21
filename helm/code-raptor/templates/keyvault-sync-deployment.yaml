@@ -1,0 +1,47 @@
+{{- if .Values.keyvaultSync.enabled }}
+{{- range .Values.namespaces }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Values.keyvaultSync.name }}
+  namespace: {{ . }}
+spec:
+  replicas: {{ $.Values.keyvaultSync.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ $.Values.keyvaultSync.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.keyvaultSync.name }}
+    spec:
+      containers:
+      - name: sync
+        image: {{ $.Values.keyvaultSync.image }}
+        command:
+        - sh
+        - -c
+        - while true; do sleep 3600; done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+        volumeMounts:
+        - name: secrets-store-inline
+          mountPath: /mnt/secrets-store
+          readOnly: true
+      volumes:
+      - name: secrets-store-inline
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: {{ $.Values.secretProviderClass.name }}
+{{- end }}
+{{- end }}

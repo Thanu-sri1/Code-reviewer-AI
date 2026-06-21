@@ -1,0 +1,30 @@
+{{- range .Values.namespaces }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Values.services.frontend.name }}
+  namespace: {{ . }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.services.frontend.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.services.frontend.name }}
+    spec:
+      containers:
+      - name: {{ $.Values.services.frontend.name }}
+        image: {{ $.Values.image.registry }}/{{ $.Values.services.frontend.image }}:{{ $.Values.image.tag }}
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: {{ $.Values.configMap.name }}
+        - secretRef:
+            name: {{ $.Values.secret.name }}
+            optional: true
+        ports:
+        - containerPort: {{ $.Values.services.frontend.port }}
+{{- end }}

@@ -1,0 +1,15 @@
+{{- range .Values.namespaces }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Values.services.review.name }}
+  namespace: {{ . }}
+spec:
+  selector:
+    app: {{ $.Values.services.review.name }}
+  ports:
+  - port: {{ $.Values.services.review.port }}
+    targetPort: {{ $.Values.services.review.port }}
+  type: ClusterIP
+{{- end }}

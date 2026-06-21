@@ -1,0 +1,6 @@
+apiVersion: v2
+name: code-raptor
+description: Helm chart for Code Raptor microservices
+type: application
+version: 0.1.0
+appVersion: "v2"

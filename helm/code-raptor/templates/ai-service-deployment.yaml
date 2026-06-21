@@ -1,0 +1,37 @@
+{{- range .Values.namespaces }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Values.services.ai.name }}
+  namespace: {{ . }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ $.Values.services.ai.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Values.services.ai.name }}
+    spec:
+      containers:
+      - name: {{ $.Values.services.ai.name }}
+        image: {{ $.Values.image.registry }}/{{ $.Values.services.ai.image }}:{{ $.Values.image.tag }}
+        imagePullPolicy: {{ $.Values.image.pullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: {{ $.Values.configMap.name }}
+        - secretRef:
+            name: {{ $.Values.secret.name }}
+            optional: true
+        env:
+        - name: AZURE_OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secret.name }}
+              key: AZURE_OPENAI_API_KEY
+              optional: true
+        ports:
+        - containerPort: {{ $.Values.services.ai.port }}
+{{- end }}
