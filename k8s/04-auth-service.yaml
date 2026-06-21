@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: auth-service
-        image: thanusri22/auth-service:v2
+        image: acrappregistrydr41xn.azurecr.io/auth-service:v1
         imagePullPolicy: Always
 
         envFrom:
