@@ -1,7 +1,7 @@
 namespaces:
   - codereviewer
 
-replicaCount: 2
+replicaCount: 1
 
 deploymentStrategy:
   type: RollingUpdate
