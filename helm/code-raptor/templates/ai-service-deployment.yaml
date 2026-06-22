@@ -7,6 +7,8 @@ metadata:
   namespace: {{ . }}
 spec:
   replicas: {{ $.Values.replicaCount }}
+  strategy:
+{{ toYaml $.Values.deploymentStrategy | indent 4 }}
   selector:
     matchLabels:
       app: {{ $.Values.services.ai.name }}
@@ -17,7 +19,7 @@ spec:
     spec:
       containers:
       - name: {{ $.Values.services.ai.name }}
-        image: {{ $.Values.image.registry }}/{{ $.Values.services.ai.image }}:{{ $.Values.image.tag }}
+        image: {{ $.Values.image.registry }}/{{ $.Values.services.ai.image }}:{{ $.Values.services.ai.tag }}
         imagePullPolicy: {{ $.Values.image.pullPolicy }}
         envFrom:
         - configMapRef:
@@ -34,4 +36,6 @@ spec:
               optional: true
         ports:
         - containerPort: {{ $.Values.services.ai.port }}
+        resources:
+{{ toYaml $.Values.services.ai.resources | indent 10 }}
 {{- end }}

@@ -1,5 +1,5 @@
 namespaces:
-  - codereviewer
+  - dev-codereviewer
 
 replicaCount: 2
 
@@ -90,7 +90,7 @@ keyvaultSync:
 
 ingress:
   enabled: true
-  namespace: codereviewer
+  namespace: dev-codereviewer
   name: codereviewer-ingress
   className: azure-application-gateway
   annotations:
