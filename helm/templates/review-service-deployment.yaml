@@ -3,21 +3,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ $.Values.services.ai.name }}
+  name: {{ $.Values.services.review.name }}
   namespace: {{ . }}
 spec:
   replicas: {{ $.Values.replicaCount }}
+  strategy:
+{{ toYaml $.Values.deploymentStrategy | indent 4 }}
   selector:
     matchLabels:
-      app: {{ $.Values.services.ai.name }}
+      app: {{ $.Values.services.review.name }}
   template:
     metadata:
       labels:
-        app: {{ $.Values.services.ai.name }}
+        app: {{ $.Values.services.review.name }}
     spec:
       containers:
-      - name: {{ $.Values.services.ai.name }}
-        image: {{ $.Values.image.registry }}/{{ $.Values.services.ai.image }}:{{ $.Values.image.tag }}
+      - name: {{ $.Values.services.review.name }}
+        image: {{ $.Values.image.registry }}/{{ $.Values.services.review.image }}:{{ $.Values.services.review.tag }}
         imagePullPolicy: {{ $.Values.image.pullPolicy }}
         envFrom:
         - configMapRef:
@@ -26,12 +28,14 @@ spec:
             name: {{ $.Values.secret.name }}
             optional: true
         env:
-        - name: AZURE_OPENAI_API_KEY
+        - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: {{ $.Values.secret.name }}
-              key: AZURE_OPENAI_API_KEY
+              key: DATABASE_URL
               optional: true
         ports:
-        - containerPort: {{ $.Values.services.ai.port }}
+        - containerPort: {{ $.Values.services.review.port }}
+        resources:
+{{ toYaml $.Values.services.review.resources | indent 10 }}
 {{- end }}

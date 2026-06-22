@@ -1,0 +1,101 @@
+namespaces:
+  - prod-codereviewer
+
+replicaCount: 2
+
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
+image:
+  registry: thanusri22
+  pullPolicy: Always
+
+configMap:
+  name: coderaptor-config
+  data:
+    AZURE_OPENAI_ENDPOINT: "https://ai-codereviewer-resource.openai.azure.com/"
+    AZURE_OPENAI_DEPLOYMENT: "gpt-4.1-mini"
+    AZURE_OPENAI_API_VERSION: "2025-01-01-preview"
+    AUTH_SERVICE_URL: "http://auth-service:8001"
+    EXECUTION_SERVICE_URL: "http://execution-service:8002"
+    AI_SERVICE_URL: "http://ai-service:8003"
+    REVIEW_SERVICE_URL: "http://review-service:8004"
+
+secret:
+  name: kv-secret
+
+secretProviderClass:
+  name: kv-secrets
+  provider: azure
+  userAssignedIdentityID: "9a0d67f9-2147-4e65-9f2b-890884fff1d2"
+  keyvaultName: keyvault-thanu
+  tenantId: cf4a245a-3bc5-4786-be95-383d6c394cf9
+
+services:
+  auth:
+    name: auth-service
+    image: auth-service
+    tag: v2
+    port: 8001
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+  execution:
+    name: execution-service
+    image: execution-service
+    tag: v2
+    port: 8002
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+  ai:
+    name: ai-service
+    image: ai-service
+    tag: v2
+    port: 8003
+    resources:
+      requests:
+        cpu: 200m
+        memory: 128Mi
+  review:
+    name: review-service
+    image: review-service
+    tag: v2
+    port: 8004
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+  frontend:
+    name: frontend
+    serviceName: frontend-service
+    image: frontend
+    tag: v2
+    port: 8501
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+
+keyvaultSync:
+  enabled: true
+  name: keyvault-secret-sync
+  image: busybox:1.36
+  replicaCount: 2
+
+ingress:
+  enabled: true
+  namespace: prod-codereviewer
+  name: codereviewer-ingress
+  className: azure-application-gateway
+  annotations:
+    appgw.ingress.kubernetes.io/backend-protocol: "http"
+    appgw.ingress.kubernetes.io/health-probe-path: "/_stcore/health"
+    appgw.ingress.kubernetes.io/health-probe-port: "8501"
+    appgw.ingress.kubernetes.io/health-probe-status-codes: "200-399"
+    appgw.ingress.kubernetes.io/request-timeout: "60"

@@ -4,7 +4,12 @@ metadata:
   name: frontend
   namespace: codereviewer
 spec:
-  replicas: 2
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: frontend
@@ -15,7 +20,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: thanusriacr.azurecr.io/frontend:v2
+        image: thanusri22/frontend:v2
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
@@ -25,6 +30,10 @@ spec:
             optional: true
         ports:
         - containerPort: 8501
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
 ---
 apiVersion: v1
 kind: Service
