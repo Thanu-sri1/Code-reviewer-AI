@@ -61,7 +61,7 @@ services:
     resources:
       requests:
         cpu: 200m
-        memory: 256Mi
+        memory: 128Mi
   review:
     name: review-service
     image: review-service
@@ -80,7 +80,7 @@ services:
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 64Mi
 
 keyvaultSync:
   enabled: true
