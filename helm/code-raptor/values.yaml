@@ -6,8 +6,8 @@ replicaCount: 2
 deploymentStrategy:
   type: RollingUpdate
   rollingUpdate:
-    maxSurge: 1
-    maxUnavailable: 0
+    maxSurge: 0
+    maxUnavailable: 1
 
 image:
   registry: thanusri22
@@ -30,7 +30,7 @@ secret:
 secretProviderClass:
   name: kv-secrets
   provider: azure
-  userAssignedIdentityID: "1946ddf5-b4a4-4e91-a422-ebc4d0636963"
+  userAssignedIdentityID: "34834556-6847-4d25-b598-d46cf23031b0"
   keyvaultName: kv-app-keyvault-efzkzm
   tenantId: cf4a245a-3bc5-4786-be95-383d6c394cf9
 
