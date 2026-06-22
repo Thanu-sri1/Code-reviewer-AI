@@ -4,7 +4,7 @@ metadata:
   name: execution-service
   namespace: codereviewer
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -33,7 +33,7 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 128Mi
+            memory: 64Mi
 ---
 apiVersion: v1
 kind: Service

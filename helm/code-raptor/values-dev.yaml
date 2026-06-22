@@ -1,7 +1,7 @@
 namespaces:
   - dev-codereviewer
 
-replicaCount: 2
+replicaCount: 1
 
 deploymentStrategy:
   type: RollingUpdate
@@ -43,7 +43,7 @@ services:
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 64Mi
   execution:
     name: execution-service
     image: execution-service
@@ -52,7 +52,7 @@ services:
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 64Mi
   ai:
     name: ai-service
     image: ai-service
@@ -70,7 +70,7 @@ services:
     resources:
       requests:
         cpu: 100m
-        memory: 128Mi
+        memory: 64Mi
   frontend:
     name: frontend
     serviceName: frontend-service
@@ -86,7 +86,7 @@ keyvaultSync:
   enabled: true
   name: keyvault-secret-sync
   image: busybox:1.36
-  replicaCount: 2
+  replicaCount: 1
 
 ingress:
   enabled: true
