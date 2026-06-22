@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: review-service
-        image: acrappregistrydr41xn.azurecr.io/review-service:v1
+        image: thanusri22/review-service:v2
         imagePullPolicy: Always
 
         envFrom:

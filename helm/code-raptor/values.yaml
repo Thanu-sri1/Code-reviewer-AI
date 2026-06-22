@@ -10,7 +10,7 @@ deploymentStrategy:
     maxUnavailable: 0
 
 image:
-  registry: acrappregistrydr41xn.azurecr.io
+  registry: thanusri22
   pullPolicy: Always
 
 configMap:
@@ -38,7 +38,7 @@ services:
   auth:
     name: auth-service
     image: auth-service
-    tag: v1
+    tag: v2
     port: 8001
     resources:
       requests:
@@ -47,7 +47,7 @@ services:
   execution:
     name: execution-service
     image: execution-service
-    tag: v1
+    tag: v2
     port: 8002
     resources:
       requests:
@@ -56,7 +56,7 @@ services:
   ai:
     name: ai-service
     image: ai-service
-    tag: v1
+    tag: v2
     port: 8003
     resources:
       requests:
@@ -65,7 +65,7 @@ services:
   review:
     name: review-service
     image: review-service
-    tag: v1
+    tag: v2
     port: 8004
     resources:
       requests:
@@ -75,7 +75,7 @@ services:
     name: frontend
     serviceName: frontend-service
     image: frontend
-    tag: v1
+    tag: v2
     port: 8501
     resources:
       requests:

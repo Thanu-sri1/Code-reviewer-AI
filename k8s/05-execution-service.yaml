@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: execution-service
-        image: acrappregistrydr41xn.azurecr.io/execution-service:v1
+        image: thanusri22/execution-service:v2
         imagePullPolicy: Always
         envFrom:
         - configMapRef:

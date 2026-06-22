@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: acrappregistrydr41xn.azurecr.io/frontend:v1 
+        image: thanusri22/frontend:v2
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
